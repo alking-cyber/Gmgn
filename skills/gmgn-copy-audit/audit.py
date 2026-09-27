@@ -186,6 +186,14 @@ def collect(chain, wallet, thesis_token, gaps):
     except Gap as e:
         d["holdings"] = None
         txt = str(e)
+        # The cause decides the remedy the report prints: telling a reader whose key was
+        # rejected to "configure GMGN_PRIVATE_KEY" sends them to redo what they already did.
+        if "429" in txt or "RATE_LIMIT" in txt:
+            d["holdings_why"] = "holdings were rate-limited — re-run after the reset"
+        elif "SIGNATURE_INVALID" in txt:
+            d["holdings_why"] = "the holdings signature was rejected — GMGN_PRIVATE_KEY is not the key paired with this API key"
+        else:
+            d["holdings_why"] = "holdings need GMGN_PRIVATE_KEY"
         if "429" in txt or "RATE_LIMIT" in txt:
             gaps.append(f"holdings refused by the rate limiter ({e}) — re-run after the reset")
         elif "SIGNATURE_INVALID" in txt:
@@ -355,6 +363,7 @@ def compute(d, now):
     # ── track record: how many coins made the money
     hold_rows = d.get("holdings")
     m["holdings_visible"] = hold_rows is not None
+    m["holdings_why"] = d.get("holdings_why") or "holdings need GMGN_PRIVATE_KEY"
     allp = [position(r) for r in (hold_rows or [])]
     winners = sorted([p for p in allp if p["total_profit"] > 0], key=lambda p: -p["total_profit"])
     gain = sum(p["total_profit"] for p in winners)
@@ -362,7 +371,7 @@ def compute(d, now):
     m["top"] = winners[0] if winners else None
     m["top_share"] = winners[0]["total_profit"] / gain if gain > 0 else None
     m["lottery"] = m["top_share"] is not None and m["top_share"] > LOTTERY_SHARE
-    m["young_story"] = m["age_days"] is not None and m["age_days"] < YOUNG_DAYS and m["n_winners"] <= 2
+    m["young_story"] = m["holdings_visible"] and m["age_days"] is not None and m["age_days"] < YOUNG_DAYS and m["n_winners"] <= 2
 
     # ── open book
     opens = open_positions(hold_rows or [])
@@ -522,7 +531,7 @@ def gap_band(g):
 
 def gap_lines(m):
     if not m["holdings_visible"]:
-        return ["not visible — holdings need GMGN_PRIVATE_KEY"]
+        return [f"not visible — {m['holdings_why']}"]
     if not m["opens"]:
         return [f"no open positions above {usd(MIN_OPEN_USD)} — nothing to copy right now"]
     out = []
@@ -543,7 +552,7 @@ def gap_lines(m):
 
 def exit_line(m):
     if not m["holdings_visible"]:
-        return "not visible — holdings need GMGN_PRIVATE_KEY"
+        return f"not visible — {m['holdings_why']}"
     if m["n_sold"] < 3:
         return f"not visible — only {m['n_sold']} position(s) with sells"
     bits = [f"recovers cost on {share(m['cost_out'] or 0)} of winners",
@@ -559,7 +568,7 @@ def exit_line(m):
 
 def worth_copying(m):
     if not m["holdings_visible"]:
-        return "Not visible — the exit habit lives in their holdings, which need GMGN_PRIVATE_KEY."
+        return f"Not visible — the exit habit lives in their holdings ({m['holdings_why']})."
     if m["exit_good"]:
         return (f"The exit: they take their cost out on {share(m['cost_out'])} of winners and ladder out over "
                 f"~{m['med_sells']:.0f} sells — copy that rule, not their entries.")
@@ -589,7 +598,7 @@ def copying_what(m, kills):
     lead = m["opens"][0] if m["opens"] else None
     if not m["holdings_visible"]:
         return ("You cannot tell. Without their open book you would be copying a trade you cannot see the cost of — "
-                "configure GMGN_PRIVATE_KEY and re-run before acting on anything.")
+                f"fix that first ({m['holdings_why']}) and re-run before acting on anything.")
     if not lead:
         return "Nothing: they hold no open position worth following. Anything you buy now is your own trade, not a copy."
     what = "their first entry"
