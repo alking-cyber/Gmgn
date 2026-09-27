@@ -35,7 +35,11 @@ const COST = P.costPct / 100;
 if (!LO || !HI) throw new Error("set S1_MIN_MCAP and S1_MAX_MCAP (or use PIPELINE_PROFILE=loose)");
 
 const t0 = now();
-const dir = join(cfg.dataDir, `replay-${new Date(t0 * 1000).toISOString().slice(0, 13)}`);
+// REPLAY_DIR reuses an earlier run's cache (same tokens, no API calls for them).
+const dir = process.env.REPLAY_DIR || join(cfg.dataDir, `replay-${new Date(t0 * 1000).toISOString().slice(0, 13)}`);
+const envList = (k: string, d: number[]) => (process.env[k] ? process.env[k]!.split(",").map(Number) : d);
+const TPS = envList("REPLAY_TPS", [1.2, 1.25, 1.3, 1.5, 2, 3]); // take-profit multiples to compare
+const SLS = envList("REPLAY_SLS", [0.75, 0.7, 0.5]); // stop-loss multiples to compare
 mkdirSync(join(dir, "k"), { recursive: true });
 mkdirSync(join(dir, "h"), { recursive: true });
 
@@ -175,17 +179,22 @@ console.log(`\nsignals: ${signals.length} (${dead} of those tokens are below $10
   (MIN_SMART ? `, >=${MIN_SMART} smart/KOL holding` : ", no smart-money requirement"));
 console.log(`paper: $${P.startCapital} start, ${P.positionPct * 100}% of equity per trade, max ${P.maxOpen} open, cost ${P.costPct}%/side, max hold ${P.maxHoldMin}m\n`);
 console.log("TP / SL".padEnd(18) + "taken  skipped  win    final     max drawdown   hit rate vs break-even");
-for (const tp of [1.2, 1.25, 1.3, 1.5, 2, 3]) {
-  for (const sl of [0.75, 0.7, 0.5]) {
+for (const tp of TPS) {
+  for (const sl of SLS) {
     const r = simulate(tp, sl);
-    const hits = signals.filter((s) => { const e = exit(s.K, tp, sl); return e && e.x >= tp; }).length;
+    const exits = signals.map((s) => exit(s.K, tp, sl)).filter((e): e is { x: number; t: number } => !!e);
+    const hits = exits.filter((e) => e.x >= tp).length;
+    const net = exits.map((e) => (e.x * (1 - COST)) / (1 + COST) - 1);
+    const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+    const avgWin = avg(net.filter((x) => x > 0)), avgLoss = avg(net.filter((x) => x <= 0));
     const win = tp * (1 - COST) / (1 + COST) - 1, loss = 1 - sl * (1 - COST) / (1 + COST);
     const mark = tp === P.takeProfit && sl === P.stopLoss ? "  ← current paper setting" : "";
     console.log(
       `+${Math.round((tp - 1) * 100)}% / -${Math.round((1 - sl) * 100)}%`.padEnd(18) +
         `${String(r.taken).padStart(5)}  ${String(r.skipped).padStart(7)}  ${String(r.wins).padStart(3)}  ` +
         `$${r.cash.toFixed(2).padStart(8)}  ${(r.mdd * 100).toFixed(0).padStart(6)}%        ` +
-        `${Math.round((hits / Math.max(signals.length, 1)) * 100)}% vs ${Math.round((loss / (win + loss)) * 100)}%${mark}`
+        `${Math.round((hits / Math.max(signals.length, 1)) * 100)}% vs ${Math.round((loss / (win + loss)) * 100)}%`.padEnd(12) +
+        `  avg win ${(avgWin * 100).toFixed(0).padStart(3)}% / avg loss ${(avgLoss * 100).toFixed(0).padStart(4)}%${mark}`
     );
   }
 }

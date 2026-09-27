@@ -79,7 +79,7 @@ Cara transaksi simulasi diisi: TP terisi tepat di levelnya (limit order); SL ter
 
 Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_OPEN`, `PAPER_TP` (2 = +100%), `PAPER_SL` (0,7 = −30%), `PAPER_MAX_HOLD_MIN`, dan `PAPER_COST_PCT`. Paper trading juga bisa diaktifkan di profil lain dengan `PAPER=1`.
 
-`pipeline:replay` mengambil token berdasarkan **umur** (termasuk yang sudah mati), memutar ulang aturan di atas per menit tanpa melihat harga ke depan, lalu membandingkan berbagai kombinasi TP/SL. Satu kali jalan hanya mewakili satu sesi pasar, jadi ulangi di hari yang berbeda. Data holder, top 10, bundler, dan dev pada waktu itu tidak tersedia, sehingga aturan-aturan tersebut tidak ikut di-replay.
+`pipeline:replay` (opsi: `REPLAY_TPS=1.15,1.3,2`, `REPLAY_SLS=0.9,0.7`, `REPLAY_DIR=<folder cache lama>` untuk memakai ulang data) mengambil token berdasarkan **umur** (termasuk yang sudah mati), memutar ulang aturan di atas per menit tanpa melihat harga ke depan, lalu membandingkan berbagai kombinasi TP/SL. Satu kali jalan hanya mewakili satu sesi pasar, jadi ulangi di hari yang berbeda. Data holder, top 10, bundler, dan dev pada waktu itu tidak tersedia, sehingga aturan-aturan tersebut tidak ikut di-replay.
 
 ## Konfigurasi
 
