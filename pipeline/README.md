@@ -22,7 +22,7 @@ npm ci
 # API key di ~/.config/gmgn/.env atau ./.env
 echo 'GMGN_API_KEY=...' >> ~/.config/gmgn/.env
 
-npm run pipeline:selftest     # tes offline, tanpa API
+npm run pipeline:selftest     # tes offline, tanpa API (kedua profil)
 npm run pipeline -- --once    # satu scan saja (smoke test)
 npm run pipeline              # jalan terus sampai Ctrl+C
 npm run pipeline:evaluate     # laporan dari data yang sudah terkumpul
@@ -39,6 +39,24 @@ pm2 logs runner
 ```
 
 State disimpan di `pipeline/data/state.json`, jadi kalau proses restart, tracking dan jurnal lanjut dari posisi terakhir.
+
+## Profil `newlaunch`: token baru, mcap kecil
+
+```bash
+npm run pipeline:newlaunch                         # atau: PIPELINE_PROFILE=newlaunch npm run pipeline
+PIPELINE_PROFILE=newlaunch npm run pipeline:evaluate
+```
+
+Profil ini memantau token launchpad (`/v1/trenches`: new, near completion, completed) tiap 20 detik, dan datanya disimpan terpisah di `data-newlaunch/`.
+
+| Tahap | Aturan (default) |
+|---|---|
+| 1. Discovery | umur 2–60 menit, mcap **$30–60 rb**, holder ≥ 80, likuiditas ≥ $8 rb, top 10 ≤ 30%, dev ≤ 5%, bundle ≤ 30%, sniper ≤ 15%, insider ≤ 15%, rug ratio ≤ 0,3, creator < 10 token (bukan peluncur serial), tidak wash trading. Kalau berbagi gambar/Twitter/website dengan token lain, hanya lolos kalau dia yang holder-nya terbanyak di antara token bersimbol sama (yang "asli" dari narasinya) |
+| 2. Tracking | minimal 3 scan / 40 detik, maksimal 10 menit: holder naik, likuiditas tidak terkuras, beli ≥ jual, bundler dan bot wajar |
+| 3. Deep dive | `token info` + 3 daftar holder: minimal **2 wallet smart money/KOL masih memegang** (> $20), **median entry top 20 holder ≤ 1,3× mcap sekarang** (holder tidak sedang rugi), dan **tidak ada wallet non-pool yang memegang > 15%**. Akun sistem berlabel (misalnya "DBC Vault") tidak dihitung sebagai whale, tapi porsinya ditampilkan di alert |
+| 4. Alert | seperti biasa, ditambah siapa yang masih memegang, harga masuk mereka, dan porsi vault |
+
+Semua angka bisa diubah lewat variabel `S1_*`, `S2_*`, `S3_*`, dan `TRENCH_*` di `config.ts`. Nilai 0 mematikan aturan "maks".
 
 ## Konfigurasi
 

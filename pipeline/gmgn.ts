@@ -1,6 +1,7 @@
 /**
  * Thin typed layer over the gmgn-cli OpenApiClient. Field names were checked
- * against live /v1/market/rank and /v1/token/info responses.
+ * against live /v1/market/rank, /v1/trenches, /v1/token/info and
+ * /v1/market/token_top_holders responses.
  */
 
 import { OpenApiClient } from "../src/client/OpenApiClient.js";
@@ -35,6 +36,8 @@ export interface RankRow {
   smartCount: number;
   kolCount: number;
   launchpad: string;
+  sniperHoldRate: number; // top70_sniper_hold_rate
+  devTokens: number; // tokens the creator has launched (trenches only; 0 when unknown)
 }
 
 /** Deep-dive / journal view of /v1/token/info. */
@@ -64,12 +67,39 @@ export interface TokenInfo {
   sellVolume1m: number;
   volume1m: number;
   volume5m: number;
+  supply: number; // circulating supply, to turn per-token prices into market caps
+  devTokens: number; // tokens the creator has launched
+}
+
+/** One row of /v1/market/token_top_holders. */
+export interface Holder {
+  address: string;
+  pct: number; // share of supply held
+  usd: number; // current value held
+  avgCost: number; // average buy price per token (0 = received, not bought)
+  soldPct: number; // share of its bought amount already sold
+  isPool: boolean; // liquidity pool account, not a trader
+  // Program account GMGN labels by name (e.g. "DBC Vault", a Meteora bonding-curve vault)
+  // that received tokens without buying: platform supply, not a wallet that can dump at will.
+  isSystem: boolean;
+  name: string;
+  tags: string[];
+}
+
+export interface TrenchQuery {
+  types: string[];
+  limit: number;
+  filters: Record<string, number | string>;
 }
 
 /** What the pipeline needs from GMGN — swapped for a fake in tests. */
 export interface GmgnSource {
   rank(chain: string, interval: string, limit: number, maxCreated: string): Promise<RankRow[]>;
   tokenInfo(chain: string, address: string): Promise<TokenInfo>;
+  /** Launchpad tokens (new / near completion / completed). Needed when PIPELINE_SOURCE=trenches. */
+  trenches?(chain: string, q: TrenchQuery): Promise<RankRow[]>;
+  /** Top holders, optionally only wallets with a tag (smart_degen, renowned). Needed for holder checks. */
+  holders?(chain: string, address: string, tag: string, limit: number): Promise<Holder[]>;
 }
 
 const n = (v: unknown): number => {
@@ -118,6 +148,38 @@ export function parseRankRow(r: Obj): RankRow {
     smartCount: n(r.smart_degen_count),
     kolCount: n(r.renowned_count),
     launchpad: text(r.launchpad_platform ?? r.launchpad),
+    sniperHoldRate: n(r.top70_sniper_hold_rate),
+    devTokens: 0,
+  };
+}
+
+/** Trenches rows carry the same data as rank rows under different names. */
+export function parseTrenchRow(r: Obj): RankRow {
+  return {
+    ...parseRankRow(r),
+    volume: n(r.volume_24h),
+    buys: n(r.buys_24h),
+    sells: n(r.sells_24h),
+    createdAt: n(r.created_timestamp) || n(r.open_timestamp),
+    devHoldRate: Math.max(n(r.dev_team_hold_rate), n(r.creator_balance_rate)),
+    isWashTrading: r.is_wash_trading === true || r.is_wash_trading === 1 || r.is_wash_trading === "1",
+    bundlerRate: n(r.bundler_trader_amount_rate),
+    insiderRate: Math.max(n(r.rat_trader_amount_rate), n(r.suspected_insider_hold_rate)),
+    devTokens: n(r.creator_created_count),
+  };
+}
+
+export function parseHolder(r: Obj): Holder {
+  return {
+    address: String(r.address),
+    pct: n(r.amount_percentage),
+    usd: n(r.usd_value),
+    avgCost: n(r.avg_cost),
+    soldPct: n(r.sell_amount_percentage),
+    isPool: r.addr_type === 2,
+    isSystem: r.addr_type !== 2 && !!r.name && !n(r.avg_cost) && !n(r.buy_tx_count_cur),
+    name: text(r.name),
+    tags: Array.isArray(r.tags) ? (r.tags as unknown[]).map(String) : [],
   };
 }
 
@@ -152,6 +214,8 @@ export function parseTokenInfo(d: Obj): TokenInfo {
     sellVolume1m: n(price.sell_volume_1m),
     volume1m: n(price.volume_1m),
     volume5m: n(price.volume_5m),
+    supply: n(d.circulating_supply || d.total_supply),
+    devTokens: n(stat.creator_created_count),
   };
 }
 
@@ -201,7 +265,7 @@ export class Throttle {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const WEIGHT = { rank: 3, tokenInfo: 1, kline: 2 };
+const WEIGHT = { rank: 3, tokenInfo: 1, kline: 2, trenches: 2, holders: 5 };
 
 export interface Candle {
   t: number; // unix seconds, candle open
@@ -251,6 +315,25 @@ export class GmgnApi implements GmgnSource {
     const data = unwrap(await this.call(WEIGHT.rank, () => this.client.getTrendingSwaps(chain, interval, extra), this.rankRetries));
     const rows = Array.isArray(data.rank) ? (data.rank as Obj[]) : [];
     return rows.filter((r) => r && r.address).map(parseRankRow);
+  }
+
+  async trenches(chain: string, q: TrenchQuery): Promise<RankRow[]> {
+    const data = unwrap(
+      await this.call(WEIGHT.trenches, () => this.client.getTrenches(chain, q.types, undefined, q.limit, q.filters), this.rankRetries)
+    );
+    const rows: RankRow[] = [];
+    for (const type of q.types) {
+      const list = Array.isArray(data[type]) ? (data[type] as Obj[]) : [];
+      for (const r of list) if (r && r.address) rows.push(parseTrenchRow(r));
+    }
+    return rows;
+  }
+
+  async holders(chain: string, address: string, tag: string, limit: number): Promise<Holder[]> {
+    const extra: Record<string, string | number> = { limit };
+    if (tag) extra.tag = tag;
+    const data = unwrap(await this.call(WEIGHT.holders, () => this.client.getTokenTopHolders(chain, address, extra)));
+    return (Array.isArray(data.list) ? (data.list as Obj[]) : []).map(parseHolder);
   }
 
   async tokenInfo(chain: string, address: string): Promise<TokenInfo> {

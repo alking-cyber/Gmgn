@@ -27,7 +27,7 @@ function row(tag: string, over: Partial<RankRow> = {}): RankRow {
     volume: 100_000, holders: 1000, buys: 300, sells: 200, createdAt: T0 - 30 * 60, top10Rate: 0.18,
     devHoldRate: 0, isWashTrading: false, bundlerRate: 0.05, botRate: 0.4, insiderRate: 0,
     entrapmentRatio: 0.05, rugRatio: 0.2, imageDup: 0, twitterDup: 0, websiteDup: 0, telegramDup: 0,
-    smartCount: 3, kolCount: 1, launchpad: "Pump.fun", ...over,
+    smartCount: 3, kolCount: 1, launchpad: "Pump.fun", sniperHoldRate: 0, devTokens: 0, ...over,
   };
 }
 
@@ -37,7 +37,7 @@ function info(tag: string, price: number, over: Partial<TokenInfo> = {}): TokenI
     top10Rate: 0.18, devHoldRate: 0, botRate: 0.4, bundlerTraderPct: 0.1, entrapmentTraderPct: 0.05,
     insiderTraderPct: 0, freshWalletRate: 0.1, smartWallets: 5, kolWallets: 2, whaleWallets: 1,
     bundlerWallets: 10, sniperWallets: 3, imageDupCount: 0, buys1m: 50, sells1m: 30, buyVolume1m: 5000,
-    sellVolume1m: 3000, volume1m: 8000, volume5m: 40000, ...over,
+    sellVolume1m: 3000, volume1m: 8000, volume5m: 40000, supply: 1e9, devTokens: 1, ...over,
   };
 }
 

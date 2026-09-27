@@ -20,8 +20,9 @@
     "publish:provenance": "npm publish --provenance --access public",
     "pipeline": "tsx pipeline/run.ts",
     "pipeline:evaluate": "tsx pipeline/evaluate.ts",
-    "pipeline:selftest": "tsx pipeline/selftest.ts",
-    "pipeline:history": "tsx pipeline/history.ts"
+    "pipeline:selftest": "tsx pipeline/selftest.ts --clean && PIPELINE_PROFILE=newlaunch tsx pipeline/selftest-newlaunch.ts",
+    "pipeline:history": "tsx pipeline/history.ts",
+    "pipeline:newlaunch": "PIPELINE_PROFILE=newlaunch tsx pipeline/run.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

@@ -58,7 +58,10 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 }
 
 console.log(
-  `[${ts()}] pipeline started: chain=${cfg.chain} intervals=${cfg.rankIntervals.join("+")} ` +
+  `[${ts()}] pipeline started: profile=${cfg.profile} chain=${cfg.chain} ` +
+    (cfg.source === "trenches"
+      ? `source=trenches $${cfg.s1.minMcap / 1000}K-$${cfg.s1.maxMcap / 1000}K <${cfg.s1.maxAgeMin}m `
+      : `source=rank intervals=${cfg.rankIntervals.join("+")} `) +
     `scan=${cfg.scanIntervalSec}s data=${cfg.dataDir}${cfg.discordWebhookUrl ? " discord=on" : ""}`
 );
 

@@ -7,11 +7,15 @@
  */
 
 import type { PipelineConfig } from "./config.js";
-import type { RankRow, TokenInfo } from "./gmgn.js";
+import type { Holder, RankRow, TokenInfo } from "./gmgn.js";
 
 // ---------------------------------------------------------------- stage 1
 
-export function stage1(row: RankRow, c: PipelineConfig["s1"], nowSec: number): string[] {
+/**
+ * `narrativeLeader`: whether this token has the most holders among the tokens
+ * with the same symbol in this scan (only used when c.copycat is "leader").
+ */
+export function stage1(row: RankRow, c: PipelineConfig["s1"], nowSec: number, narrativeLeader = true): string[] {
   const reasons: string[] = [];
   const ageMin = (nowSec - row.createdAt) / 60;
   if (!row.createdAt || ageMin < c.minAgeMin) reasons.push("too_young");
@@ -21,8 +25,20 @@ export function stage1(row: RankRow, c: PipelineConfig["s1"], nowSec: number): s
   if (row.top10Rate > c.maxTop10Rate) reasons.push("top10_concentrated");
   if (row.devHoldRate > c.maxDevHoldRate) reasons.push("dev_concentrated");
   if (row.isWashTrading) reasons.push("wash_trading");
+  if (c.minMcap && row.marketCap < c.minMcap) reasons.push("mcap_below_band");
+  if (c.maxMcap && row.marketCap > c.maxMcap) reasons.push("mcap_above_band");
+  if (row.bundlerRate > c.maxBundlerRate) reasons.push("bundled");
+  if (row.sniperHoldRate > c.maxSniperHoldRate) reasons.push("snipers_hold");
+  if (row.insiderRate > c.maxInsiderRate) reasons.push("insiders");
+  if (row.rugRatio > c.maxRugRatio) reasons.push("rug_ratio_high");
+  if (c.maxDevTokens && row.devTokens >= c.maxDevTokens) reasons.push("serial_launcher");
+  const shared = row.imageDup + row.twitterDup + row.websiteDup > 0;
+  if (c.copycat === "leader" && shared && !narrativeLeader) reasons.push("copycat");
   return reasons;
 }
+
+/** Normalized symbol used to group clones of one narrative. */
+export const narrativeKey = (row: RankRow) => row.symbol.trim().toLowerCase();
 
 // ---------------------------------------------------------------- stage 2
 
@@ -124,7 +140,17 @@ export function stage2(s: TrackState, c: PipelineConfig["s2"], nowSec: number): 
 
 // ---------------------------------------------------------------- stage 3
 
-export function stage3(row: RankRow, info: TokenInfo, c: PipelineConfig["s3"]): string[] {
+/** Holder lists for the stage-3 holder checks; omitted when those checks are off. */
+export interface HolderSet {
+  smart: Holder[]; // tag smart_degen
+  kol: Holder[]; // tag renowned
+  top: Holder[]; // by share of supply
+}
+
+export const needsHolders = (c: PipelineConfig["s3"]) =>
+  c.minHoldingSmart > 0 || c.maxTop20EntryMult > 0 || c.maxSingleHolderPct > 0;
+
+export function stage3(row: RankRow, info: TokenInfo, c: PipelineConfig["s3"], h?: HolderSet): string[] {
   const reasons: string[] = [];
   // rug_ratio and the *_dup counts only exist on the rank row, not in token info.
   if (row.rugRatio > c.maxRugRatio) reasons.push("rug_ratio_high");
@@ -136,5 +162,41 @@ export function stage3(row: RankRow, info: TokenInfo, c: PipelineConfig["s3"]): 
   if (Math.max(row.imageDup, info.imageDupCount) > c.maxImageDup) reasons.push("image_copycat");
   if (row.twitterDup > c.maxTwitterDup) reasons.push("twitter_copycat");
   if (row.websiteDup > c.maxWebsiteDup) reasons.push("website_copycat");
+  if (c.maxDevTokens && info.devTokens >= c.maxDevTokens) reasons.push("serial_launcher");
+  if (h && needsHolders(c)) reasons.push(...holderChecks(info, c, h));
+  return reasons;
+}
+
+/** Entry market cap of a holder: its average buy price times circulating supply. */
+export const entryMcap = (x: Holder, supply: number) => x.avgCost * supply;
+
+export function holderSummary(info: TokenInfo, h: HolderSet, minUsd: number) {
+  const holding = [...h.smart, ...h.kol].filter((x, i, all) => x.usd > minUsd && all.findIndex((y) => y.address === x.address) === i);
+  const traders = h.top.filter((x) => !x.isPool && !x.isSystem);
+  const entries = traders
+    .slice(0, 20)
+    .filter((x) => x.avgCost > 0)
+    .map((x) => entryMcap(x, info.supply))
+    .sort((a, b) => a - b);
+  return {
+    smartHolding: holding.length,
+    smartHoldingUsd: holding.reduce((a, x) => a + x.usd, 0),
+    smartEntryMcaps: holding.filter((x) => x.avgCost > 0).map((x) => entryMcap(x, info.supply)),
+    top20EntryMedian: entries.length ? entries[Math.floor(entries.length / 2)] : 0,
+    biggestHolder: traders.reduce<Holder | undefined>((a, x) => (!a || x.pct > a.pct ? x : a), undefined),
+    // Supply parked in labelled program accounts (vesting / bonding-curve vaults): future supply.
+    systemPct: h.top.filter((x) => x.isSystem).reduce((a, x) => a + x.pct, 0),
+  };
+}
+
+function holderChecks(info: TokenInfo, c: PipelineConfig["s3"], h: HolderSet): string[] {
+  const reasons: string[] = [];
+  const s = holderSummary(info, h, c.holderMinUsd);
+  if (c.minHoldingSmart && s.smartHolding < c.minHoldingSmart) reasons.push("smart_money_not_holding");
+  // Median top-20 entry well above today's market cap: the holder base is underwater.
+  if (c.maxTop20EntryMult && info.marketCap > 0 && s.top20EntryMedian > c.maxTop20EntryMult * info.marketCap) {
+    reasons.push("holders_underwater");
+  }
+  if (c.maxSingleHolderPct && s.biggestHolder && s.biggestHolder.pct > c.maxSingleHolderPct) reasons.push("whale_holder");
   return reasons;
 }

@@ -7,7 +7,18 @@
  */
 
 import type { PipelineConfig } from "./config.js";
-import { stage1, stage2, stage3, obsFromRow, type TrackState, type TrackSummary } from "./filters.js";
+import {
+  stage1,
+  stage2,
+  stage3,
+  obsFromRow,
+  narrativeKey,
+  needsHolders,
+  holderSummary,
+  type HolderSet,
+  type TrackState,
+  type TrackSummary,
+} from "./filters.js";
 import type { GmgnSource, RankRow, TokenInfo } from "./gmgn.js";
 import type { Store } from "./store.js";
 
@@ -73,6 +84,14 @@ export class Pipeline {
 
     const { seen, tracking, counters } = this.state;
 
+    // The token with the most holders among same-symbol clones is the narrative's leader.
+    const leaders = new Map<string, RankRow>();
+    for (const row of rows.values()) {
+      const k = narrativeKey(row);
+      const cur = leaders.get(k);
+      if (!cur || row.holders > cur.holders) leaders.set(k, row);
+    }
+
     for (const row of rows.values()) {
       let s = seen[row.address];
       if (!s) {
@@ -81,7 +100,7 @@ export class Pipeline {
       }
       if (s.stage !== "s1_rejected") continue; // already tracked or decided
 
-      const reasons = stage1(row, this.cfg.s1, t);
+      const reasons = stage1(row, this.cfg.s1, t, leaders.get(narrativeKey(row))?.address === row.address);
       if (reasons.length) {
         const key = reasons.join(",");
         if (s.lastReasons !== key) {
@@ -124,6 +143,22 @@ export class Pipeline {
 
   private async fetchUniverse(): Promise<Map<string, RankRow> | null> {
     const merged = new Map<string, RankRow>();
+    if (this.cfg.source === "trenches") {
+      if (!this.src.trenches) throw new Error("PIPELINE_SOURCE=trenches but the data source has no trenches()");
+      const q = this.cfg.trenches;
+      try {
+        const rows = await this.src.trenches(this.cfg.chain, {
+          types: q.types,
+          limit: q.limit,
+          filters: { min_marketcap: q.minMcap, max_marketcap: q.maxMcap, max_created: q.maxCreated },
+        });
+        for (const r of rows) if (!merged.has(r.address)) merged.set(r.address, r);
+        return merged;
+      } catch (err) {
+        this.log(`[scan] trenches failed: ${(err as Error).message}`);
+        return null;
+      }
+    }
     let ok = 0;
     for (const interval of this.cfg.rankIntervals) {
       try {
@@ -143,8 +178,17 @@ export class Pipeline {
   private async deepDive(addr: string, tr: Tracked, summary: TrackSummary): Promise<void> {
     const { seen, tracking, counters } = this.state;
     let info: TokenInfo;
+    let holders: HolderSet | undefined;
     try {
       info = await this.src.tokenInfo(this.cfg.chain, addr);
+      if (needsHolders(this.cfg.s3)) {
+        if (!this.src.holders) throw new Error("holder checks are on but the data source has no holders()");
+        holders = {
+          smart: await this.src.holders(this.cfg.chain, addr, "smart_degen", 100),
+          kol: await this.src.holders(this.cfg.chain, addr, "renowned", 50),
+          top: await this.src.holders(this.cfg.chain, addr, "", 40),
+        };
+      }
     } catch (err) {
       // Stay in tracking and retry on the next scan, a few times at most.
       tr.deepDiveErrors++;
@@ -161,9 +205,10 @@ export class Pipeline {
     this.store.event("s2_pass", { address: addr, symbol: tr.symbol, summary, obs: tr.obs });
     delete tracking[addr];
 
-    const reasons = stage3(tr.lastRow, info, this.cfg.s3);
+    const hs = holders ? holderSummary(info, holders, this.cfg.s3.holderMinUsd) : undefined;
+    const reasons = stage3(tr.lastRow, info, this.cfg.s3, holders);
     if (reasons.length) {
-      this.store.event("s3_fail", { address: addr, symbol: tr.symbol, reasons, row: tr.lastRow, info });
+      this.store.event("s3_fail", { address: addr, symbol: tr.symbol, reasons, row: tr.lastRow, info, holders: hs });
       seen[addr].stage = "s3_failed";
       return;
     }
@@ -177,9 +222,9 @@ export class Pipeline {
       alertPrice: info.price,
       until: t + this.cfg.journalHours * 3600,
     };
-    this.store.event("alert", { address: addr, symbol: tr.symbol, row: tr.lastRow, info, summary });
+    this.store.event("alert", { address: addr, symbol: tr.symbol, row: tr.lastRow, info, summary, holders: hs });
     this.store.journal(addr, snapshot(t, info));
-    await this.notify(formatAlert(this.cfg.chain, addr, tr.lastRow, info, summary)).catch((err) =>
+    await this.notify(formatAlert(this.cfg.chain, addr, tr.lastRow, info, summary, hs)).catch((err) =>
       this.log(`[alert] notify failed: ${(err as Error).message}`)
     );
   }
@@ -240,8 +285,15 @@ const usd = (v: number) =>
   v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}K` : `$${v.toFixed(0)}`;
 const pc = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
-export function formatAlert(chain: string, addr: string, row: RankRow, info: TokenInfo, s: TrackSummary): string {
-  return [
+export function formatAlert(
+  chain: string,
+  addr: string,
+  row: RankRow,
+  info: TokenInfo,
+  s: TrackSummary,
+  h?: ReturnType<typeof holderSummary>
+): string {
+  const lines = [
     `🔔 **${info.symbol || row.symbol}** passed all 4 stages (${chain})`,
     `\`${addr}\``,
     `MC ${usd(info.marketCap)} · Liq ${usd(info.liquidity)} · Holders ${info.holders}`,
@@ -249,6 +301,17 @@ export function formatAlert(chain: string, addr: string, row: RankRow, info: Tok
       `liq ${pc(s.liquidityChangePct)}, price ${pc(s.priceChangePct)}, buy/sell ${s.buySellRatio.toFixed(2)}`,
     `Smart ${info.smartWallets} · KOL ${info.kolWallets} · Bot ${(info.botRate * 100).toFixed(0)}% · ` +
       `Rug ratio ${row.rugRatio.toFixed(2)} · Top10 ${(info.top10Rate * 100).toFixed(0)}%`,
-    `https://gmgn.ai/${chain}/token/${addr}`,
-  ].join("\n");
+  ];
+  if (h) {
+    const e = [...h.smartEntryMcaps].sort((a, b) => a - b);
+    lines.push(
+      `Smart/KOL still holding ${h.smartHolding} (${usd(h.smartHoldingUsd)})` +
+        (e.length ? `, entries ${usd(e[0])}–${usd(e[e.length - 1])}` : "") +
+        ` · Top-20 median entry ${usd(h.top20EntryMedian)}` +
+        (h.biggestHolder ? ` · Biggest holder ${(h.biggestHolder.pct * 100).toFixed(1)}%` : "") +
+        (h.systemPct > 0.01 ? ` · Vault/locked ${(h.systemPct * 100).toFixed(0)}%` : "")
+    );
+  }
+  lines.push(`https://gmgn.ai/${chain}/token/${addr}`);
+  return lines.join("\n");
 }
