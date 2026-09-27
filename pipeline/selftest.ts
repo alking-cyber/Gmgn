@@ -14,6 +14,7 @@ import { cfg } from "./config.js";
 import type { GmgnSource, RankRow, TokenInfo } from "./gmgn.js";
 import { Pipeline } from "./pipeline.js";
 import { Store, readJsonl } from "./store.js";
+import { STRATEGIES, runExit } from "./strategies.js";
 
 let clock = 1_800_000_000;
 const T0 = clock;
@@ -146,6 +147,19 @@ assert.ok(notified[0].includes("passed all 4 stages"));
 assert.ok(logs.some((l) => l.includes("RATE_LIMIT_EXCEEDED")), "rank error logged, pipeline kept going");
 assert.ok(logs.some((l) => l.includes("deep-dive") && l.includes("RETRY")), "deep dive error logged");
 console.log("  ✓ rate-limited scan and deep-dive error were logged and survived");
+
+// Exit strategies, checked by hand (no costs).
+const A = STRATEGIES["A: 50% @+50%, 25% sisa/+25%, stop modal"]!;
+const close = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+// 50%@1.5 + 12.5%@1.75 + 9.375%@2.0, remaining 28.125% out at entry.
+assert.ok(close(runExit([1, 1.5, 1.75, 2.0, 1.0], A, 0), 0.4375), "strategy A ladder");
+assert.ok(close(runExit([1, 0.5], A, 0), -0.5), "stop gapped through fills at observed price");
+assert.ok(close(runExit([1, 1.6, 0.1], STRATEGIES["jual semua +50%, SL -30%"]!, 0), 0.5), "full take-profit fills at its level");
+assert.ok(close(runExit([1, 2], null, 0), 1), "hold");
+const trail = runExit([1, 1.5, 3, 2.0, 1.0], STRATEGIES["A + trailing 30%, SL -30%"]!, 0);
+assert.ok(trail > runExit([1, 1.5, 3, 2.0, 1.0], A, 0), "trailing stop keeps more than a stop at entry");
+assert.ok(close(runExit([1, 1], null, 0.015), 0.985 / 1.015 - 1), "costs on both sides");
+console.log("  ✓ exit strategies: ladder, gap-through stop, full TP, hold, trailing, costs");
 
 console.log(`\n${p.statusLine()}`);
 console.log(`API calls: ${calls.rank} rank, ${calls.info} token info`);

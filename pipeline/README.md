@@ -72,9 +72,21 @@ Satu scan memakai 2 panggilan rank (6 unit), ditambah 1 unit per token yang lolo
 1. corong (funnel) dan aturan mana yang paling banyak menggugurkan token di tiap tahap;
 2. hasil setiap alert: kenaikan tertinggi, harga akhir, harga terendah, dan waktu menuju puncak;
 3. perbandingan runner vs non-runner saat alert (butuh minimal 4 alert; baru bermakna setelah sekitar 30+);
-4. backtest TP/SL.
+4. backtest strategi exit dari `strategies.ts`, masing-masing diuji dengan beli tepat saat alert dan beli setelah jeda `BT_ENTRY_DELAY_SEC` (default 30 detik).
 
-**Catatan backtest:** slippage (`BT_SLIPPAGE_PCT`, default 3%) dan fee (`BT_FEE_PCT`, default 1%) adalah angka asumsi yang tetap, bukan dihitung dari data transaksi on-chain. Pakai hasilnya untuk membandingkan aturan exit satu sama lain, bukan sebagai perkiraan profit.
+| Strategi | Aturan |
+|---|---|
+| hold | beli, tahan sampai jurnal habis (6 jam) |
+| C | jual semua di +25%, SL −25% |
+| D | jual semua di +25%, SL −12% |
+| +50% | jual semua di +50%, SL −30% |
+| A | jual 50% di +50%, lalu 25% dari sisa di setiap +25% berikutnya; sisa dijual kalau harga balik ke harga beli; SL −25% sebelum target pertama |
+| A + stop bertahap | seperti A, tapi stop naik ke target sebelumnya setiap kali target baru tersentuh; SL −30% |
+| A + trailing | seperti A, tapi sisa dijual kalau harga turun 30% dari puncaknya; SL −30% |
+
+Strategi baru cukup ditambahkan ke `STRATEGIES` di `strategies.ts`.
+
+**Catatan backtest:** stop loss terisi di harga snapshot yang melewatinya (harga bisa lompat melewati stop), sedangkan take profit terisi tepat di levelnya. Slippage (`BT_SLIPPAGE_PCT`, default 0,5%) dan fee (`BT_FEE_PCT`, default 1%) adalah angka asumsi yang tetap, bukan dihitung dari data transaksi on-chain. Pakai hasilnya untuk membandingkan strategi satu sama lain, bukan sebagai perkiraan profit, dan baru pilih strategi setelah ada 30+ alert.
 
 ## Batasan
 

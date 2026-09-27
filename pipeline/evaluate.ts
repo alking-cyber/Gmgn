@@ -5,7 +5,7 @@
  *   1. the funnel and which rules cut the most tokens at each stage
  *   2. the outcome of every alerted token (peak / final multiple from the journal)
  *   3. which alert-time features separate runners from the rest
- *   4. a simple TP/SL backtest with slippage and fees
+ *   4. a backtest of the exit strategies in strategies.ts, with slippage and fees
  *
  * Slippage and fees here are fixed assumptions (BT_SLIPPAGE_PCT, BT_FEE_PCT),
  * not derived from on-chain fills. Treat the backtest as a relative comparison
@@ -16,11 +16,12 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { cfg } from "./config.js";
 import { readJsonl } from "./store.js";
+import { STRATEGIES, runExit } from "./strategies.js";
 
 const envNum = (k: string, d: number) => (process.env[k] ? Number(process.env[k]) : d);
 const RUNNER_X = envNum("RUNNER_X", 2); // peak multiple that counts as a runner
 const ENTRY_DELAY_SEC = envNum("BT_ENTRY_DELAY_SEC", 30); // reaction time after the alert
-const SLIPPAGE_PCT = envNum("BT_SLIPPAGE_PCT", 3); // per side
+const SLIPPAGE_PCT = envNum("BT_SLIPPAGE_PCT", 0.5); // per side
 const FEE_PCT = envNum("BT_FEE_PCT", 1); // per side
 
 type Ev = { t: number; type: string; address: string; symbol: string; reasons?: string[]; [k: string]: unknown };
@@ -151,39 +152,41 @@ if (outcomes.length >= 4) {
 // ------------------------------------------------------------------ 4. backtest
 
 if (outcomes.length) {
-  console.log(
-    `=== Backtest: entry ${ENTRY_DELAY_SEC}s after alert, slippage ${SLIPPAGE_PCT}%/side, fee ${FEE_PCT}%/side ===`
-  );
-  console.log("TP      SL      trades  win%    avg ret   total ret");
   const cost = (SLIPPAGE_PCT + FEE_PCT) / 100;
-  for (const tp of [1.5, 2, 3, 5]) {
-    for (const sl of [0.6, 0.75, 0.85]) {
+  // Each exit strategy is run twice: entering at the alert, and after a reaction delay.
+  const delays = [...new Set([0, ENTRY_DELAY_SEC])];
+  console.log(`=== Backtest: exit strategies, cost ${SLIPPAGE_PCT + FEE_PCT}%/side, $100 per alert ===`);
+  console.log(
+    "strategy".padEnd(42) +
+      delays.map((d) => `entry +${d}s`.padStart(24)).join("") +
+      "\n" +
+      " ".repeat(42) +
+      delays.map(() => "win%     avg   total".padStart(24)).join("")
+  );
+  for (const [name, rule] of Object.entries(STRATEGIES)) {
+    let line = name.padEnd(42);
+    for (const d of delays) {
       const rets: number[] = [];
       for (const o of outcomes) {
-        const entrySnap = o.snaps.find((s) => s.t >= o.snaps[0].t + ENTRY_DELAY_SEC);
-        if (!entrySnap) continue;
-        const entry = entrySnap.price * (1 + cost);
-        let exit = o.snaps[o.snaps.length - 1].price; // time stop at journal end
-        for (const s of o.snaps) {
-          if (s.t <= entrySnap.t) continue;
-          // Exits fill at the snapshot price that crossed the level, not the level itself.
-          if (s.price >= entrySnap.price * tp || s.price <= entrySnap.price * sl) {
-            exit = s.price;
-            break;
-          }
-        }
-        rets.push((exit * (1 - cost)) / entry - 1);
+        const start = o.snaps.findIndex((s) => s.t >= o.snaps[0].t + d);
+        if (start < 0 || o.snaps.length - start < 2) continue;
+        rets.push(runExit(o.snaps.slice(start).map((s) => s.price), rule, cost));
       }
-      if (!rets.length) continue;
+      if (!rets.length) {
+        line += "-".padStart(24);
+        continue;
+      }
       const wins = rets.filter((x) => x > 0).length;
       const avg = rets.reduce((a, b) => a + b, 0) / rets.length;
-      console.log(
-        `${(tp + "x").padEnd(8)}${(sl + "x").padEnd(8)}${String(rets.length).padEnd(8)}` +
-          `${share(wins, rets.length).padEnd(8)}${pcs(avg).padEnd(10)}${pcs(avg * rets.length)}`
-      );
+      const total = rets.reduce((a, r) => a + 100 * (1 + r), 0);
+      line += `  ${share(wins, rets.length).padStart(6)} ${pcs(avg).padStart(7)} ${("$" + total.toFixed(0)).padStart(7)}`;
     }
+    console.log(line);
   }
-  console.log("  (total ret = sum of per-trade returns with equal size per trade)");
+  console.log(
+    `  (${outcomes.length} alerts; stops fill at the snapshot price that crossed them, targets at their level;\n` +
+      "   positions still open when the journal ends are closed at the last price. Pick a strategy only after 30+ alerts.)"
+  );
 }
 
 // ------------------------------------------------------------------ helpers
