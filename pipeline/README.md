@@ -58,6 +58,29 @@ Profil ini memantau token launchpad (`/v1/trenches`: new, near completion, compl
 
 Semua angka bisa diubah lewat variabel `S1_*`, `S2_*`, `S3_*`, dan `TRENCH_*` di `config.ts`. Nilai 0 mematikan aturan "maks".
 
+## Profil `loose` + paper trading
+
+```bash
+npm run pipeline:loose                             # scan + paper trading, jalan terus
+PIPELINE_PROFILE=loose npm run pipeline:evaluate   # laporan, termasuk hasil paper trading
+npm run pipeline:replay                            # uji ulang aturan yang sama pada token 3-10 jam terakhir
+```
+
+Profil ini **tidak mengirim order sungguhan.** Setiap alert membuka posisi simulasi, dan hasilnya dicatat supaya strateginya bisa dinilai dengan data live sebelum memakai uang sungguhan.
+
+| Bagian | Aturan (default) |
+|---|---|
+| Discovery | token launchpad umur 2–60 menit, mcap $20–150 rb, minimal 50 holder dan likuiditas $5 rb. Tanpa syarat smart money, dev, bundle, atau jiplakan |
+| Tracking | minimal 3 scan / 40 detik; gagal hanya kalau likuiditas turun lebih dari 25% |
+| Paper trading | modal $140, **10% ekuitas per transaksi**, maksimal **8 posisi** terbuka (alert berikutnya dilewati dan dihitung), **TP +100%** (jual semua), **SL −30%**, tutup paksa setelah **180 menit**, biaya 1,5% per sisi |
+| Jurnal | hanya token yang sedang dipegang, tiap 30 detik; berhenti saat posisi ditutup |
+
+Cara transaksi simulasi diisi: TP terisi tepat di levelnya (limit order); SL terisi di harga pertama yang terlihat di bawah level (kalau harga melompat, rugi lebih besar dari −30%); harga dicek tiap 30 detik.
+
+Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_OPEN`, `PAPER_TP` (2 = +100%), `PAPER_SL` (0,7 = −30%), `PAPER_MAX_HOLD_MIN`, dan `PAPER_COST_PCT`. Paper trading juga bisa diaktifkan di profil lain dengan `PAPER=1`.
+
+`pipeline:replay` mengambil token berdasarkan **umur** (termasuk yang sudah mati), memutar ulang aturan di atas per menit tanpa melihat harga ke depan, lalu membandingkan berbagai kombinasi TP/SL. Satu kali jalan hanya mewakili satu sesi pasar, jadi ulangi di hari yang berbeda. Data holder, top 10, bundler, dan dev pada waktu itu tidak tersedia, sehingga aturan-aturan tersebut tidak ikut di-replay.
+
 ## Konfigurasi
 
 Semua angka ada di `config.ts` dan bisa ditimpa lewat `.env`. Yang paling sering diubah:

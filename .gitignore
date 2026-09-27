@@ -27,3 +27,4 @@ skills-lock.json
 # Runner pipeline data (events, journal, state)
 pipeline/data/
 pipeline/data-newlaunch/
+pipeline/data-loose/

@@ -62,7 +62,10 @@ console.log(
     (cfg.source === "trenches"
       ? `source=trenches $${cfg.s1.minMcap / 1000}K-$${cfg.s1.maxMcap / 1000}K <${cfg.s1.maxAgeMin}m `
       : `source=rank intervals=${cfg.rankIntervals.join("+")} `) +
-    `scan=${cfg.scanIntervalSec}s data=${cfg.dataDir}${cfg.discordWebhookUrl ? " discord=on" : ""}`
+    `scan=${cfg.scanIntervalSec}s data=${cfg.dataDir}${cfg.discordWebhookUrl ? " discord=on" : ""}` +
+    (cfg.paper.enabled
+      ? ` paper=on ($${cfg.paper.startCapital}, ${cfg.paper.positionPct * 100}%/trade, TP x${cfg.paper.takeProfit}, SL x${cfg.paper.stopLoss}, max ${cfg.paper.maxHoldMin}m)`
+      : "")
 );
 
 await Promise.all([

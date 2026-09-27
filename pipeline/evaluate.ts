@@ -189,6 +189,30 @@ if (outcomes.length) {
   );
 }
 
+// ------------------------------------------------------------------ 5. paper trading
+
+const closes = byType("paper_close") as unknown as Array<{
+  t: number; symbol: string; reason: string; ret: number; size: number; proceeds: number; heldMin: number; cashAfter: number;
+}>;
+const opens = byType("paper_open");
+if (opens.length) {
+  console.log(`\n=== Paper trading (${cfg.paper.positionPct * 100}% per trade, TP x${cfg.paper.takeProfit}, SL x${cfg.paper.stopLoss}) ===`);
+  const wins = closes.filter((c) => c.ret > 0).length;
+  const byReason = new Map<string, number>();
+  for (const c of closes) byReason.set(c.reason, (byReason.get(c.reason) ?? 0) + 1);
+  const pnl = closes.reduce((a, c) => a + c.proceeds - c.size, 0);
+  console.log(`opened ${opens.length}, closed ${closes.length}, still open ${opens.length - closes.length}`);
+  console.log(`win ${wins}/${closes.length} (${share(wins, closes.length)}), exits: ${[...byReason].map(([k, v]) => `${k} ${v}`).join(", ")}`);
+  console.log(`realized P&L $${pnl.toFixed(2)} on $${cfg.paper.startCapital} start; cash after last close $${closes.length ? closes[closes.length - 1].cashAfter.toFixed(2) : "-"}`);
+  if (closes.length) {
+    const rets = closes.map((c) => c.ret).sort((a, b) => a - b);
+    console.log(`per trade: median ${pcs(rets[Math.floor(rets.length / 2)])}, avg ${pcs(rets.reduce((a, b) => a + b, 0) / rets.length)}, ` +
+      `worst ${pcs(rets[0])}, best ${pcs(rets[rets.length - 1])}`);
+    const days = (closes[closes.length - 1].t - opens[0].t) / 86400;
+    console.log(`over ${days.toFixed(1)} days. Treat as evidence only after 100+ closed trades across several days.`);
+  }
+}
+
 // ------------------------------------------------------------------ helpers
 
 function get(e: Ev, section: string, key: string): number {

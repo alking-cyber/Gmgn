@@ -20,9 +20,11 @@
     "publish:provenance": "npm publish --provenance --access public",
     "pipeline": "tsx pipeline/run.ts",
     "pipeline:evaluate": "tsx pipeline/evaluate.ts",
-    "pipeline:selftest": "tsx pipeline/selftest.ts --clean && PIPELINE_PROFILE=newlaunch tsx pipeline/selftest-newlaunch.ts",
+    "pipeline:selftest": "tsx pipeline/selftest.ts --clean && PIPELINE_PROFILE=newlaunch tsx pipeline/selftest-newlaunch.ts && PIPELINE_PROFILE=loose tsx pipeline/selftest-paper.ts",
     "pipeline:history": "tsx pipeline/history.ts",
-    "pipeline:newlaunch": "PIPELINE_PROFILE=newlaunch tsx pipeline/run.ts"
+    "pipeline:newlaunch": "PIPELINE_PROFILE=newlaunch tsx pipeline/run.ts",
+    "pipeline:loose": "PIPELINE_PROFILE=loose tsx pipeline/run.ts",
+    "pipeline:replay": "PIPELINE_PROFILE=${PIPELINE_PROFILE:-loose} tsx pipeline/replay.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

@@ -21,6 +21,7 @@ import {
 } from "./filters.js";
 import type { GmgnSource, RankRow, TokenInfo } from "./gmgn.js";
 import type { Store } from "./store.js";
+import { Paper, emptyPaper, type PaperClose, type PaperState } from "./paper.js";
 
 type Stage = "s1_rejected" | "tracking" | "s2_failed" | "s3_failed" | "alerted";
 
@@ -49,6 +50,7 @@ export interface PipelineState {
   tracking: Record<string, Tracked>;
   journaling: Record<string, Journaled>;
   counters: { seen: number; s1Pass: number; s2Pass: number; alerts: number };
+  paper?: PaperState;
 }
 
 export const emptyState = (): PipelineState => ({
@@ -65,6 +67,8 @@ const MAX_DEEP_DIVE_ERRORS = 3;
 export type Notify = (text: string) => Promise<void>;
 
 export class Pipeline {
+  private readonly paper?: Paper;
+
   constructor(
     private readonly cfg: PipelineConfig,
     private readonly src: GmgnSource,
@@ -73,7 +77,14 @@ export class Pipeline {
     private readonly clock: () => number,
     readonly state: PipelineState = emptyState(),
     private readonly log: (msg: string) => void = console.log
-  ) {}
+  ) {
+    if (cfg.paper.enabled) {
+      if (cfg.journalHours * 60 < cfg.paper.maxHoldMin) {
+        throw new Error("JOURNAL_HOURS must cover PAPER_MAX_HOLD_MIN: paper positions are priced by the journal");
+      }
+      this.paper = new Paper(cfg.paper, (state.paper ??= emptyPaper(cfg.paper.startCapital)));
+    }
+  }
 
   // ------------------------------------------------------------ stage 1 + 2
 
@@ -216,17 +227,42 @@ export class Pipeline {
     const t = this.clock();
     seen[addr].stage = "alerted";
     counters.alerts++;
-    this.state.journaling[addr] = {
-      symbol: tr.symbol,
-      alertAt: t,
-      alertPrice: info.price,
-      until: t + this.cfg.journalHours * 3600,
-    };
     this.store.event("alert", { address: addr, symbol: tr.symbol, row: tr.lastRow, info, summary, holders: hs });
-    this.store.journal(addr, snapshot(t, info));
-    await this.notify(formatAlert(this.cfg.chain, addr, tr.lastRow, info, summary, hs)).catch((err) =>
-      this.log(`[alert] notify failed: ${(err as Error).message}`)
-    );
+    let text = formatAlert(this.cfg.chain, addr, tr.lastRow, info, summary, hs);
+    const pos = this.paper?.open(addr, tr.symbol, info.price, t);
+    if (this.cfg.journalAllAlerts || pos) {
+      this.state.journaling[addr] = {
+        symbol: tr.symbol,
+        alertAt: t,
+        alertPrice: info.price,
+        until: t + this.cfg.journalHours * 3600,
+      };
+      this.store.journal(addr, snapshot(t, info));
+    }
+    if (pos) {
+      this.store.event("paper_open", { address: addr, symbol: tr.symbol, price: pos.entryPrice, size: pos.size, cash: this.paper!.s.cash });
+      const c = this.cfg.paper;
+      text +=
+        `\n📝 Paper buy $${pos.size.toFixed(2)} · TP ${usd(info.marketCap * c.takeProfit)} mcap (+${Math.round((c.takeProfit - 1) * 100)}%)` +
+        ` · SL ${usd(info.marketCap * c.stopLoss)} (-${Math.round((1 - c.stopLoss) * 100)}%) · max ${c.maxHoldMin}m`;
+    }
+    await this.notify(text).catch((err) => this.log(`[alert] notify failed: ${(err as Error).message}`));
+  }
+
+  private async onPaperClose(c: PaperClose): Promise<void> {
+    this.paper!.trackDrawdown();
+    this.store.event("paper_close", { ...c });
+    if (!this.cfg.journalAllAlerts && this.state.journaling[c.address]) {
+      // Only held tokens are polled in this mode: stop once the position is closed.
+      delete this.state.journaling[c.address];
+      this.store.event("journal_done", { address: c.address, symbol: c.symbol });
+    }
+    const icon = c.ret > 0 ? "✅" : "❌";
+    const why = { take_profit: "take-profit", stop_loss: "stop-loss", time_stop: "time stop" }[c.reason];
+    await this.notify(
+      `${icon} Paper sell **${c.symbol}** (${why}) after ${Math.round(c.heldMin)}m: ${c.ret >= 0 ? "+" : ""}${(c.ret * 100).toFixed(0)}% ` +
+        `($${c.size.toFixed(2)} → $${c.proceeds.toFixed(2)})\n${this.paper!.summary()}`
+    ).catch((err) => this.log(`[paper] notify failed: ${(err as Error).message}`));
   }
 
   async journalTick(): Promise<void> {
@@ -238,7 +274,10 @@ export class Pipeline {
         continue;
       }
       try {
-        this.store.journal(addr, snapshot(t, await this.src.tokenInfo(this.cfg.chain, addr)));
+        const info = await this.src.tokenInfo(this.cfg.chain, addr);
+        this.store.journal(addr, snapshot(t, info));
+        const closed = this.paper?.mark(addr, info.price, t);
+        if (closed) await this.onPaperClose(closed);
       } catch (err) {
         this.log(`[journal] ${j.symbol} ${addr} failed: ${(err as Error).message}`);
       }
@@ -255,7 +294,8 @@ export class Pipeline {
     const c = this.state.counters;
     return (
       `funnel: ${c.seen} seen → ${c.s1Pass} passed s1 → ${c.s2Pass} passed s2 → ${c.alerts} alerts | ` +
-      `tracking ${Object.keys(this.state.tracking).length}, journaling ${Object.keys(this.state.journaling).length}`
+      `tracking ${Object.keys(this.state.tracking).length}, journaling ${Object.keys(this.state.journaling).length}` +
+      (this.paper ? ` | ${this.paper.summary()}` : "")
     );
   }
 }
