@@ -26,7 +26,10 @@ npm run pipeline:selftest     # tes offline, tanpa API
 npm run pipeline -- --once    # satu scan saja (smoke test)
 npm run pipeline              # jalan terus sampai Ctrl+C
 npm run pipeline:evaluate     # laporan dari data yang sudah terkumpul
+npm run pipeline:history      # backtest strategi exit dengan candle 14 hari terakhir
 ```
+
+`pipeline:history` tidak bisa menguji filter tahap 1–3, karena GMGN tidak menyimpan data trending, holder, bot, atau bundler masa lalu. Sebagai pengganti alert, script ini memakai sinyal harga dan volume (umur ≥ 10 menit, mcap ≥ $40K, volume 5 menit ≥ $10K, harga naik dalam 15 menit). Daftar tokennya diambil dari daftar trending hari ini, jadi hasilnya condong ke token yang bertahan hidup (survivorship bias). Hasil "hold" akan terlihat jauh lebih bagus dari kenyataan. Pengaturannya ada di `HISTORY_*` dan `ENTRY_*` di awal `history.ts`.
 
 Di VPS dengan pm2:
 

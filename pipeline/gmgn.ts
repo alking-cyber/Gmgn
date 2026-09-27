@@ -201,35 +201,80 @@ export class Throttle {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const WEIGHT = { rank: 3, tokenInfo: 1 };
+const WEIGHT = { rank: 3, tokenInfo: 1, kline: 2 };
+
+export interface Candle {
+  t: number; // unix seconds, candle open
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  volume: number; // USD
+}
 
 export class GmgnApi implements GmgnSource {
   private readonly client = new OpenApiClient(getConfig());
 
   // GMGN_RATE_LIMIT = your plan's rate (Free 5, Plus 20, Pro 50). Run at 80% of it for headroom.
-  constructor(planRate = Number(process.env.GMGN_RATE_LIMIT) || 5, private readonly throttle = new Throttle(planRate * 0.8, planRate)) {}
+  constructor(
+    planRate = Number(process.env.GMGN_RATE_LIMIT) || 5,
+    private readonly throttle = new Throttle(planRate * 0.8, planRate),
+    // The live pipeline skips a failed rank call (the next scan is 30s away); batch jobs retry.
+    private readonly rankRetries = 0
+  ) {}
 
-  private async call<T>(weight: number, fn: () => Promise<T>): Promise<T> {
-    await this.throttle.take(weight);
-    try {
-      return await fn();
-    } catch (err) {
-      const reset = (err as { resetAtUnix?: number }).resetAtUnix;
-      if (reset) this.throttle.pauseUntil(reset);
-      else if (/RATE_LIMIT/.test(String((err as Error).message))) this.throttle.pauseUntil(Date.now() / 1000 + 60);
-      throw err;
+  /** `retries`: how many times to retry after a 429 (the throttle waits out the reset first). */
+  private async call<T>(weight: number, fn: () => Promise<T>, retries = 0): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      await this.throttle.take(weight);
+      try {
+        return await fn();
+      } catch (err) {
+        const reset = (err as { resetAtUnix?: number }).resetAtUnix;
+        const limited = reset != null || /RATE_LIMIT/.test(String((err as Error).message));
+        if (reset) this.throttle.pauseUntil(reset);
+        else if (limited) this.throttle.pauseUntil(Date.now() / 1000 + 60);
+        if (!limited || attempt >= retries) throw err;
+      }
     }
   }
 
-  async rank(chain: string, interval: string, limit: number, maxCreated: string): Promise<RankRow[]> {
-    const extra: Record<string, string | number> = { limit };
+  async rank(
+    chain: string,
+    interval: string,
+    limit: number,
+    maxCreated: string,
+    more: Record<string, string | number> = {}
+  ): Promise<RankRow[]> {
+    const extra: Record<string, string | number> = { limit, ...more };
     if (maxCreated) extra.max_created = maxCreated;
-    const data = unwrap(await this.call(WEIGHT.rank, () => this.client.getTrendingSwaps(chain, interval, extra)));
+    const data = unwrap(await this.call(WEIGHT.rank, () => this.client.getTrendingSwaps(chain, interval, extra), this.rankRetries));
     const rows = Array.isArray(data.rank) ? (data.rank as Obj[]) : [];
     return rows.filter((r) => r && r.address).map(parseRankRow);
   }
 
   async tokenInfo(chain: string, address: string): Promise<TokenInfo> {
     return parseTokenInfo(unwrap(await this.call(WEIGHT.tokenInfo, () => this.client.getTokenInfo(chain, address))));
+  }
+
+  /**
+   * Candles in [from, to) (unix seconds), oldest first. The API takes milliseconds and
+   * returns at most ~100 candles per call, so this converts and pages.
+   */
+  async klines(chain: string, address: string, resolution: string, from: number, to: number): Promise<Candle[]> {
+    const stepSec = ({ "1m": 60, "5m": 300, "15m": 900, "1h": 3600 } as Record<string, number>)[resolution];
+    if (!stepSec) throw new Error(`unsupported resolution ${resolution}`);
+    const out = new Map<number, Candle>();
+    for (let a = from; a < to; a += stepSec * 100) {
+      const b = Math.min(to, a + stepSec * 100);
+      const data = unwrap(await this.call(WEIGHT.kline, () => this.client.getTokenKline(chain, address, resolution, a * 1000, b * 1000), 5));
+      const list = Array.isArray(data.list) ? (data.list as Obj[]) : [];
+      for (const k of list) {
+        const raw = n(k.time);
+        const t = raw > 1e11 ? Math.floor(raw / 1000) : raw;
+        if (t >= from && t < to) out.set(t, { t, o: n(k.open), h: n(k.high), l: n(k.low), c: n(k.close), volume: n(k.volume) });
+      }
+    }
+    return [...out.values()].sort((x, y) => x.t - y.t);
   }
 }

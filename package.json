@@ -20,7 +20,8 @@
     "publish:provenance": "npm publish --provenance --access public",
     "pipeline": "tsx pipeline/run.ts",
     "pipeline:evaluate": "tsx pipeline/evaluate.ts",
-    "pipeline:selftest": "tsx pipeline/selftest.ts"
+    "pipeline:selftest": "tsx pipeline/selftest.ts",
+    "pipeline:history": "tsx pipeline/history.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",
