@@ -1,0 +1,235 @@
+/**
+ * Thin typed layer over the gmgn-cli OpenApiClient. Field names were checked
+ * against live /v1/market/rank and /v1/token/info responses.
+ */
+
+import { OpenApiClient } from "../src/client/OpenApiClient.js";
+import { getConfig } from "../src/config.js";
+import { sanitizeString } from "../src/sanitize.js";
+
+/** One row of /v1/market/rank, reduced to the fields the pipeline uses. */
+export interface RankRow {
+  address: string;
+  symbol: string;
+  name: string;
+  price: number;
+  marketCap: number;
+  liquidity: number;
+  volume: number;
+  holders: number;
+  buys: number;
+  sells: number;
+  createdAt: number; // unix seconds
+  top10Rate: number;
+  devHoldRate: number;
+  isWashTrading: boolean;
+  bundlerRate: number;
+  botRate: number;
+  insiderRate: number; // rat_trader_amount_rate
+  entrapmentRatio: number;
+  rugRatio: number;
+  imageDup: number; // number of OTHER tokens sharing this image
+  twitterDup: number;
+  websiteDup: number;
+  telegramDup: number;
+  smartCount: number;
+  kolCount: number;
+  launchpad: string;
+}
+
+/** Deep-dive / journal view of /v1/token/info. */
+export interface TokenInfo {
+  address: string;
+  symbol: string;
+  price: number;
+  marketCap: number;
+  liquidity: number;
+  holders: number;
+  top10Rate: number;
+  devHoldRate: number;
+  botRate: number;
+  bundlerTraderPct: number;
+  entrapmentTraderPct: number;
+  insiderTraderPct: number;
+  freshWalletRate: number;
+  smartWallets: number;
+  kolWallets: number;
+  whaleWallets: number;
+  bundlerWallets: number;
+  sniperWallets: number;
+  imageDupCount: number;
+  buys1m: number;
+  sells1m: number;
+  buyVolume1m: number;
+  sellVolume1m: number;
+  volume1m: number;
+  volume5m: number;
+}
+
+/** What the pipeline needs from GMGN — swapped for a fake in tests. */
+export interface GmgnSource {
+  rank(chain: string, interval: string, limit: number, maxCreated: string): Promise<RankRow[]>;
+  tokenInfo(chain: string, address: string): Promise<TokenInfo>;
+}
+
+const n = (v: unknown): number => {
+  const x = typeof v === "string" ? parseFloat(v) : typeof v === "number" ? v : NaN;
+  return Number.isFinite(x) ? x : 0;
+};
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});
+
+// Some responses come back as the bare payload, others still wrapped in {code, data}.
+const unwrap = (v: unknown): Obj => {
+  const o = obj(v);
+  return "code" in o && o.data && typeof o.data === "object" ? obj(o.data) : o;
+};
+
+// Token names/symbols are attacker-controlled; neutralize them before they are
+// logged, posted to Discord, or read back by an AI agent.
+const text = (v: unknown): string => sanitizeString(String(v ?? "")).slice(0, 64);
+
+export function parseRankRow(r: Obj): RankRow {
+  return {
+    address: String(r.address),
+    symbol: text(r.symbol),
+    name: text(r.name),
+    price: n(r.price),
+    marketCap: n(r.market_cap),
+    liquidity: n(r.liquidity),
+    volume: n(r.volume),
+    holders: n(r.holder_count),
+    buys: n(r.buys),
+    sells: n(r.sells),
+    createdAt: n(r.creation_timestamp) || n(r.open_timestamp),
+    top10Rate: n(r.top_10_holder_rate),
+    devHoldRate: n(r.dev_team_hold_rate),
+    isWashTrading: Boolean(r.is_wash_trading),
+    bundlerRate: n(r.bundler_rate),
+    botRate: n(r.bot_degen_rate),
+    insiderRate: n(r.rat_trader_amount_rate),
+    entrapmentRatio: n(r.entrapment_ratio),
+    rugRatio: n(r.rug_ratio),
+    imageDup: n(r.image_dup),
+    twitterDup: n(r.twitter_dup),
+    websiteDup: n(r.website_dup),
+    telegramDup: n(r.telegram_dup),
+    smartCount: n(r.smart_degen_count),
+    kolCount: n(r.renowned_count),
+    launchpad: text(r.launchpad_platform ?? r.launchpad),
+  };
+}
+
+export function parseTokenInfo(d: Obj): TokenInfo {
+  const price = obj(d.price);
+  const stat = obj(d.stat);
+  const tags = obj(d.wallet_tags_stat);
+  const p = n(price.price);
+  return {
+    address: String(d.address),
+    symbol: text(d.symbol),
+    price: p,
+    marketCap: p * n(d.circulating_supply || d.total_supply),
+    liquidity: n(d.liquidity),
+    holders: n(stat.holder_count) || n(d.holder_count),
+    top10Rate: n(stat.top_10_holder_rate),
+    devHoldRate: n(stat.dev_team_hold_rate),
+    botRate: n(stat.bot_degen_rate),
+    bundlerTraderPct: n(stat.top_bundler_trader_percentage),
+    entrapmentTraderPct: n(stat.top_entrapment_trader_percentage),
+    insiderTraderPct: n(stat.top_rat_trader_percentage),
+    freshWalletRate: n(stat.fresh_wallet_rate),
+    smartWallets: n(tags.smart_wallets),
+    kolWallets: n(tags.renowned_wallets),
+    whaleWallets: n(tags.whale_wallets),
+    bundlerWallets: n(tags.bundler_wallets),
+    sniperWallets: n(tags.sniper_wallets),
+    imageDupCount: n(d.image_dup_count),
+    buys1m: n(price.buys_1m),
+    sells1m: n(price.sells_1m),
+    buyVolume1m: n(price.buy_volume_1m),
+    sellVolume1m: n(price.sell_volume_1m),
+    volume1m: n(price.volume_1m),
+    volume5m: n(price.volume_5m),
+  };
+}
+
+/**
+ * Client-side leaky bucket matching GMGN's limiter (Free 5/5, Plus 20/20,
+ * Pro 50/50 rate/capacity; /v1/market/rank costs 3, /v1/token/info costs 1).
+ * Without it, two back-to-back rank calls on the Free plan (3+3 > 5) trip
+ * RATE_LIMIT_EXCEEDED, and repeating that escalates to RATE_LIMIT_BANNED.
+ * All calls go through one queue, so the scan and journal loops share it.
+ */
+export class Throttle {
+  private level = 0;
+  private last = Date.now();
+  private pausedUntil = 0;
+  private queue: Promise<void> = Promise.resolve();
+
+  constructor(private readonly rate: number, private readonly capacity: number) {}
+
+  take(weight: number): Promise<void> {
+    const w = Math.min(weight, this.capacity);
+    const run = async () => {
+      for (;;) {
+        const t = Date.now();
+        this.level = Math.max(0, this.level - ((t - this.last) / 1000) * this.rate);
+        this.last = t;
+        if (t < this.pausedUntil) {
+          await sleep(this.pausedUntil - t);
+          continue;
+        }
+        if (this.level + w <= this.capacity) {
+          this.level += w;
+          return;
+        }
+        await sleep(((this.level + w - this.capacity) / this.rate) * 1000 + 20);
+      }
+    };
+    const p = this.queue.then(run);
+    this.queue = p.catch(() => {});
+    return p;
+  }
+
+  /** Stop all calls until the server's reset time (after a 429). */
+  pauseUntil(unixSec: number): void {
+    this.pausedUntil = Math.max(this.pausedUntil, unixSec * 1000 + 1000);
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const WEIGHT = { rank: 3, tokenInfo: 1 };
+
+export class GmgnApi implements GmgnSource {
+  private readonly client = new OpenApiClient(getConfig());
+
+  // GMGN_RATE_LIMIT = your plan's rate (Free 5, Plus 20, Pro 50). Run at 80% of it for headroom.
+  constructor(planRate = Number(process.env.GMGN_RATE_LIMIT) || 5, private readonly throttle = new Throttle(planRate * 0.8, planRate)) {}
+
+  private async call<T>(weight: number, fn: () => Promise<T>): Promise<T> {
+    await this.throttle.take(weight);
+    try {
+      return await fn();
+    } catch (err) {
+      const reset = (err as { resetAtUnix?: number }).resetAtUnix;
+      if (reset) this.throttle.pauseUntil(reset);
+      else if (/RATE_LIMIT/.test(String((err as Error).message))) this.throttle.pauseUntil(Date.now() / 1000 + 60);
+      throw err;
+    }
+  }
+
+  async rank(chain: string, interval: string, limit: number, maxCreated: string): Promise<RankRow[]> {
+    const extra: Record<string, string | number> = { limit };
+    if (maxCreated) extra.max_created = maxCreated;
+    const data = unwrap(await this.call(WEIGHT.rank, () => this.client.getTrendingSwaps(chain, interval, extra)));
+    const rows = Array.isArray(data.rank) ? (data.rank as Obj[]) : [];
+    return rows.filter((r) => r && r.address).map(parseRankRow);
+  }
+
+  async tokenInfo(chain: string, address: string): Promise<TokenInfo> {
+    return parseTokenInfo(unwrap(await this.call(WEIGHT.tokenInfo, () => this.client.getTokenInfo(chain, address))));
+  }
+}
