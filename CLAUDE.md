@@ -37,6 +37,7 @@ This is a **Claude Code plugin** — a collection of GMGN OpenAPI skills for on-
 | `gmgn-contract-dd` | One 0-100 contract due-diligence score for a bare address | User pastes a token address and wants a verdict number, with no name to disambiguate and no amount to size. |
 | `gmgn-holder-analysis` | Chip / holder structure of one token | User asks about holder distribution or chip concentration. |
 | `gmgn-wallet-analysis` | Wallet decision dossier | User asks whether a wallet is worth copy-trading. |
+| `gmgn-copy-audit` | Copy-trade audit of the open book right now — "am I buying their exit?" | User wants to copy a trader NOW and asks whether it is too late or whether they'd be exit liquidity: "am I buying their exit", "copy trade audit", "is it too late to copy this wallet", "他现在还能跟吗", "跟进去是不是接盘", "跟单审计" |
 | `gmgn-cooking` | Launchpad token creation | User wants to create or launch a token. |
 
 ## Quick Decision Guide
@@ -62,6 +63,7 @@ Match the user's request to the right skill and workflow:
 | "钱包盈利能力怎么样", "钱包战绩怎么样", "is this wallet profitable" | `gmgn-wallet-score` (profitability angle — track-record score) |
 | "跟单评分", "钱包评分", "值不值得跟单", "is this wallet worth copying", "copy trade score", wallet address provided + copy-trade decision | `gmgn-wallet-score` (copy-tradeability angle — score + backtest) |
 | "钱包发盘情况怎么样", "是不是发币方钱包", "dev 信誉怎么样", "is this a token-creator wallet" | `gmgn-wallet-score` (Dev-reputation angle) |
+| "am I buying their exit", "is it too late to copy", "copy trade audit", "跟进去是不是接盘", "他现在还能跟吗", "跟单审计", leaderboard/fomo trader + copy-now question | `gmgn-copy-audit` — entry gap per open position, first buy vs. add, speed, exit habit → COPY / STUDY / IGNORE |
 | "risk warning", "风险预警", "有没有巨鲸出货", "流动性正常吗", "这个项目还安全吗" | `gmgn-token` + `gmgn-track` → `docs/workflow-risk-warning.md` |
 | "swap", "sell TOKEN", "buy TOKEN" **only when the user says skip the checks** | `gmgn-swap` — MUST run `gmgn-token security` on output token first. A plain "buy TOKEN" with no skip-the-checks instruction is `gmgn-token-buy`. |
 | "chart", "price history", "kline", "OHLCV" | `gmgn-market kline` |
