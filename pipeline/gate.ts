@@ -40,6 +40,7 @@ export const GATE = {
   fundingWindowSec: 600,
   maxFundedTogether: 4, // 5+ in one window is a red flag
   maxSameFunder: 4,
+  launchBelowCross: false, // true: a token that opened at or above crossMcap has no cross to buy
 };
 
 export type GateResult =
@@ -59,6 +60,7 @@ export type GateResult =
 export function runnerGate(candles: Candle[], supply: number, createdAt: number, now: number, g = GATE): GateResult {
   if (!candles.length || !(supply > 0)) return now - createdAt > g.maxCrossAgeMin * 60 ? { status: "ignored", why: "no candles" } : { status: "pending" };
   if (candles[0].o * supply >= g.inflatedMcap) return { status: "ignored", why: "inflated launch" };
+  if (g.launchBelowCross && candles[0].o * supply >= g.crossMcap) return { status: "ignored", why: "launched above the cross level" };
   const i = candles.findIndex((k) => k.c * supply >= g.crossMcap);
   if (i < 0 || candles[i].t + 60 - createdAt > g.maxCrossAgeMin * 60) {
     return now - createdAt > g.maxCrossAgeMin * 60 ? { status: "ignored", why: "did not cross $100K in its first hour" } : { status: "pending" };

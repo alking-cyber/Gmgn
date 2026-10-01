@@ -286,8 +286,9 @@ export class GmgnApi implements GmgnSource {
   private readonly client = new OpenApiClient(getConfig());
 
   // GMGN_RATE_LIMIT = your plan's rate (Free 5, Plus 20, Pro 50). Run at 80% of it for headroom.
+  // Default 3, not 5: on the Free plan the per-IP limit answered 4 units/s with 30s bans, 2.4/s ran clean.
   constructor(
-    planRate = Number(process.env.GMGN_RATE_LIMIT) || 5,
+    planRate = Number(process.env.GMGN_RATE_LIMIT) || 3,
     private readonly throttle = new Throttle(planRate * 0.8, planRate),
     // The live pipeline skips a failed rank call (the next scan is 30s away); batch jobs retry.
     private readonly rankRetries = 0
@@ -364,12 +365,20 @@ export class GmgnApi implements GmgnSource {
     return out;
   }
 
+  // The kline endpoint answers calls closer than ~0.8s apart with a ~30s penalty each, whatever the
+  // plan's overall rate, so kline calls are also spaced on their own.
+  private nextKlineAt = 0;
+  private readonly klineGapMs = Number(process.env.KLINE_MIN_GAP_MS) || 850;
+
   async klines(chain: string, address: string, resolution: string, from: number, to: number): Promise<Candle[]> {
     const stepSec = ({ "1m": 60, "5m": 300, "15m": 900, "1h": 3600 } as Record<string, number>)[resolution];
     if (!stepSec) throw new Error(`unsupported resolution ${resolution}`);
     const out = new Map<number, Candle>();
     for (let a = from; a < to; a += stepSec * 100) {
       const b = Math.min(to, a + stepSec * 100);
+      const wait = this.nextKlineAt - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      this.nextKlineAt = Date.now() + this.klineGapMs;
       const data = unwrap(await this.call(WEIGHT.kline, () => this.client.getTokenKline(chain, address, resolution, a * 1000, b * 1000), 5));
       const list = Array.isArray(data.list) ? (data.list as Obj[]) : [];
       for (const k of list) {

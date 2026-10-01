@@ -86,6 +86,17 @@ Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_O
 
 `pipeline:replay` (opsi: `REPLAY_TPS=1.15,1.3,2`, `REPLAY_SLS=0.9,0.7`, `REPLAY_DIR=<folder cache lama>` untuk memakai ulang data) mengambil token berdasarkan **umur** (termasuk yang sudah mati), memutar ulang aturan di atas per menit tanpa melihat harga ke depan, lalu membandingkan berbagai kombinasi TP/SL. Satu kali jalan hanya mewakili satu sesi pasar, jadi ulangi di hari yang berbeda. Data holder, top 10, bundler, dan dev pada waktu itu tidak tersedia, sehingga aturan-aturan tersebut tidak ikut di-replay.
 
+## Profil `early`: entry di $10 rb
+
+```bash
+npm run pipeline:early                             # scan + paper trading, jalan terus
+PIPELINE_PROFILE=early npm run pipeline:evaluate
+```
+
+Sama dengan profil loose (modal $50, stop −30%, trailing 30% setelah 3×, biaya $0,10 per transaksi), tapi entry dipindah ke titik tembus mcap **$10 rb**. Syaratnya: titik tembus terjadi paling lambat **60 menit** setelah launch, volume 5 menit menjelang titik tembus minimal **$5 rb**, token tidak dibuka di atas $10 rb sejak launch, dan mcap saat dibeli tidak lebih dari 1,5× titik tembus. Token dibeli begitu pertama kali terlihat, tanpa menunggu beberapa scan. Data disimpan di `data-early/`.
+
+Hasil uji berbobot (token yang lulus diambil dari daftar 2.095 token, token yang mati dari sesi berbasis umur): sekitar **+5% sampai +7% per trade**, tapi rentang 90%-nya masih mencakup rugi (−3% sampai +15%). Simulasi modal $50 dengan 10% per trade: median sekitar $23–27 setelah 100 trade, dan 69–73% simulasi berakhir rugi. Filter volume $5 rb hampir tidak menyaring apa-apa. Pengaturan: `GATE_CROSS_MCAP`, `GATE_MIN_VOLUME_5M`, `GATE_MAX_CROSS_AGE_MIN`, `S3_MAX_CHASE_MULT`.
+
 ## Pencatat peluang runner: `pipeline:runners`
 
 ```bash
@@ -104,7 +115,7 @@ Semua angka ada di `config.ts` dan bisa ditimpa lewat `.env`. Yang paling sering
 
 | Variabel | Default | Arti |
 |---|---|---|
-| `GMGN_RATE_LIMIT` | `5` | Rate paket GMGN: Free 5, Plus 20, Pro 50. Pipeline memakai 80% dari angka ini. |
+| `GMGN_RATE_LIMIT` | `3` | Rate paket GMGN: Free 5, Plus 20, Pro 50. Pipeline memakai 80% dari angka ini. Default 3 karena di paket Free batas per IP sudah memberi penalti 30 detik pada 4 unit/detik. |
 | `DISCORD_WEBHOOK_URL` | – | Kalau diisi, alert juga dikirim ke Discord. |
 | `PIPELINE_CHAIN` | `sol` | Chain yang dipantau. |
 | `RANK_INTERVALS` | `1m,5m` | Interval trending yang digabung tiap scan. |

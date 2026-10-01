@@ -21,7 +21,7 @@ import {
 } from "./filters.js";
 import type { GmgnSource, RankRow, TokenInfo } from "./gmgn.js";
 import type { Store } from "./store.js";
-import { fundingFlags, runnerGate, type GateResult } from "./gate.js";
+import { GATE, fundingFlags, runnerGate, type GateResult } from "./gate.js";
 import { Paper, emptyPaper, type PaperClose, type PaperPartial, type PaperState, type Strength } from "./paper.js";
 
 type Stage = "s1_rejected" | "tracking" | "s2_failed" | "s3_failed" | "alerted";
@@ -211,10 +211,10 @@ export class Pipeline {
         const created = tr.lastRow.createdAt;
         const from = created - (created % 60);
         const K = await this.src.klines(this.cfg.chain, addr, "1m", from, from + 61 * 60);
-        gate = runnerGate(K, info.supply > 0 ? info.supply : info.marketCap / info.price, created, this.clock());
+        gate = runnerGate(K, info.supply > 0 ? info.supply : info.marketCap / info.price, created, this.clock(), { ...GATE, ...this.cfg.gate });
         if ((gate.status === "pass" || gate.status === "fail") && this.cfg.s3.fundingCheck) {
           if (!this.src.traderFunding) throw new Error("the funding check is on but the data source has no traderFunding()");
-          funding = fundingFlags(await this.src.traderFunding(this.cfg.chain, addr, 100), created, gate.crossAt);
+          funding = fundingFlags(await this.src.traderFunding(this.cfg.chain, addr, 100), created, gate.crossAt, { ...GATE, ...this.cfg.gate });
         }
       }
     } catch (err) {
@@ -239,7 +239,7 @@ export class Pipeline {
       if (gate.status === "pass" || gate.status === "fail") {
         reasons.push(...gate.reasons);
         if (info.marketCap > this.cfg.s3.maxChaseMult * gate.crossMcap) reasons.push("chased"); // already ran far past the cross
-      } else reasons.push(gate.status === "pending" ? "not_crossed_100k" : "gate_ignored");
+      } else reasons.push(gate.status === "pending" ? "not_crossed_yet" : "gate_ignored");
     }
     if (funding) reasons.push(...funding.reasons);
     if (reasons.length) {
