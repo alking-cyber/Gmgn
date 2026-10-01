@@ -21,6 +21,7 @@ import {
 } from "./filters.js";
 import type { GmgnSource, RankRow, TokenInfo } from "./gmgn.js";
 import type { Store } from "./store.js";
+import { fundingFlags, runnerGate, type GateResult } from "./gate.js";
 import { Paper, emptyPaper, type PaperClose, type PaperPartial, type PaperState, type Strength } from "./paper.js";
 
 type Stage = "s1_rejected" | "tracking" | "s2_failed" | "s3_failed" | "alerted";
@@ -192,6 +193,8 @@ export class Pipeline {
     const { seen, tracking, counters } = this.state;
     let info: TokenInfo;
     let holders: HolderSet | undefined;
+    let gate: GateResult | undefined;
+    let funding: ReturnType<typeof fundingFlags> | undefined;
     try {
       info = await this.src.tokenInfo(this.cfg.chain, addr);
       if (needsHolders(this.cfg.s3)) {
@@ -201,6 +204,18 @@ export class Pipeline {
           kol: await this.src.holders(this.cfg.chain, addr, "renowned", 50),
           top: await this.src.holders(this.cfg.chain, addr, "", 40),
         };
+      }
+      if (this.cfg.s3.runnerGate) {
+        // the tested entry: the $100K cross must pass the runner gate, and the funding checks
+        if (!this.src.klines) throw new Error("the runner gate is on but the data source has no klines()");
+        const created = tr.lastRow.createdAt;
+        const from = created - (created % 60);
+        const K = await this.src.klines(this.cfg.chain, addr, "1m", from, from + 61 * 60);
+        gate = runnerGate(K, info.supply > 0 ? info.supply : info.marketCap / info.price, created, this.clock());
+        if ((gate.status === "pass" || gate.status === "fail") && this.cfg.s3.fundingCheck) {
+          if (!this.src.traderFunding) throw new Error("the funding check is on but the data source has no traderFunding()");
+          funding = fundingFlags(await this.src.traderFunding(this.cfg.chain, addr, 100), created, gate.crossAt);
+        }
       }
     } catch (err) {
       // Stay in tracking and retry on the next scan, a few times at most.
@@ -220,6 +235,13 @@ export class Pipeline {
 
     const hs = holders ? holderSummary(info, holders, this.cfg.s3.holderMinUsd) : undefined;
     const reasons = stage3(tr.lastRow, info, this.cfg.s3, holders);
+    if (gate) {
+      if (gate.status === "pass" || gate.status === "fail") {
+        reasons.push(...gate.reasons);
+        if (info.marketCap > this.cfg.s3.maxChaseMult * gate.crossMcap) reasons.push("chased"); // already ran far past the cross
+      } else reasons.push(gate.status === "pending" ? "not_crossed_100k" : "gate_ignored");
+    }
+    if (funding) reasons.push(...funding.reasons);
     if (reasons.length) {
       this.store.event("s3_fail", { address: addr, symbol: tr.symbol, reasons, row: tr.lastRow, info, holders: hs });
       seen[addr].stage = "s3_failed";

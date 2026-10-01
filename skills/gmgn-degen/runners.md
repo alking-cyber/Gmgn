@@ -64,6 +64,20 @@ The table above compares runners with other survivors. Compared instead with 179
 
 Loose gate used by `scan` (5-min volume ≥ $15K, crossed ≥ 1 minute after launch, 5-min change ≤ +200%): 11 of 15 runners pass, 24% of ordinary tokens pass. Missed: ZCAT, MASK and BTC (crossed in their first minute; ZCAT and BTC with almost no volume) and AGI (+534% in the 5 minutes into the cross). 72 gate variants were compared on these 15 runners, so the chosen one is partly fitted to them.
 
+## Red flags from wallet data, tested
+
+Measured on the same ordinary tokens with each token's 100 biggest buyers (funding = the SOL transfer that funded the wallet, counted only between 24 hours before launch and the $100K cross):
+
+| Check | Tokens it would drop | Their average trade (half at 2×) vs the rest | Runners it would drop | Used? |
+|---|---|---|---|---|
+| ≥ 5 wallets funded inside one 10-minute window | 11 of 166 | −34% vs −26% | 0 | yes |
+| ≥ 5 wallets from one non-exchange funder | 2 of 166 | −55% vs −26% | 0 | yes (tiny sample) |
+| > 80% green candles into the cross (bot ramp) | 22 of 56 with 4+ candles | −43% vs −27% | 0 of 8 | yes |
+| ≥ 20 bundler-tagged wallets | 53 of 166 | −12% vs −34% (better) | 15 of 15 | **no** |
+| ≥ 10 fresh-wallet-tagged buyers | 38 of 166 | −19% vs −29% (better) | 0 | **no** |
+
+Runner trader lists are the top 100 of thousands of traders, so their funding counts are not comparable with the ordinary tokens; the "runners it would drop" column only shows that none hit the funding thresholds.
+
 ## Limits
 
 - Survivors only: tokens that never reached $300K are not in this data, so this explains which survivors became huge, not how many tokens die. Most launches die.

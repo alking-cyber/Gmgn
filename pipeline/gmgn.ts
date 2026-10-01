@@ -4,6 +4,7 @@
  * /v1/market/token_top_holders responses.
  */
 
+import type { Funding } from "./gate.js";
 import { OpenApiClient } from "../src/client/OpenApiClient.js";
 import { getConfig } from "../src/config.js";
 import { sanitizeString } from "../src/sanitize.js";
@@ -101,6 +102,10 @@ export interface GmgnSource {
   trenches?(chain: string, q: TrenchQuery): Promise<RankRow[]>;
   /** Top holders, optionally only wallets with a tag (smart_degen, renowned). Needed for holder checks. */
   holders?(chain: string, address: string, tag: string, limit: number): Promise<Holder[]>;
+  /** 1-minute (or other) candles, unix seconds. Needed for the runner gate. */
+  klines?(chain: string, address: string, resolution: string, from: number, to: number): Promise<Candle[]>;
+  /** When and from where the token's biggest buyers were funded. Needed for the funding checks. */
+  traderFunding?(chain: string, address: string, limit: number): Promise<Funding[]>;
 }
 
 const n = (v: unknown): number => {
@@ -266,7 +271,7 @@ export class Throttle {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const WEIGHT = { rank: 3, tokenInfo: 1, kline: 2, trenches: 2, holders: 5 };
+const WEIGHT = { rank: 3, tokenInfo: 1, kline: 2, trenches: 2, holders: 5, traders: 5 };
 
 export interface Candle {
   t: number; // unix seconds, candle open
@@ -345,6 +350,20 @@ export class GmgnApi implements GmgnSource {
    * Candles in [from, to) (unix seconds), oldest first. The API takes milliseconds and
    * returns at most ~100 candles per call, so this converts and pages.
    */
+  async traderFunding(chain: string, address: string, limit: number): Promise<Funding[]> {
+    const data = unwrap(
+      await this.call(WEIGHT.traders, () => this.client.getTokenTopTraders(chain, address, { limit, order_by: "buy_volume_cur", direction: "desc" }), 3)
+    );
+    const list = Array.isArray(data) ? (data as Obj[]) : Array.isArray(data.list) ? (data.list as Obj[]) : [];
+    const out: Funding[] = [];
+    for (const h of list) {
+      const t = obj(h.native_transfer);
+      const at = n(t.timestamp);
+      if (at > 0) out.push({ at, from: String(t.from_address ?? ""), exchange: t.name ? String(t.name) : null });
+    }
+    return out;
+  }
+
   async klines(chain: string, address: string, resolution: string, from: number, to: number): Promise<Candle[]> {
     const stepSec = ({ "1m": 60, "5m": 300, "15m": 900, "1h": 3600 } as Record<string, number>)[resolution];
     if (!stepSec) throw new Error(`unsupported resolution ${resolution}`);

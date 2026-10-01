@@ -66,11 +66,12 @@ PIPELINE_PROFILE=loose npm run pipeline:evaluate   # laporan, termasuk hasil pap
 npm run pipeline:replay                            # uji ulang aturan yang sama pada token 3-10 jam terakhir
 ```
 
-Profil ini **tidak mengirim order sungguhan.** Setiap alert membuka posisi simulasi, dan hasilnya dicatat supaya strateginya bisa dinilai dengan data live sebelum memakai uang sungguhan.
+Profil ini menjalankan strategi yang sudah diuji di replay. Profil ini **tidak mengirim order sungguhan.** Setiap alert membuka posisi simulasi, dan hasilnya dicatat supaya strateginya bisa dinilai dengan data live sebelum memakai uang sungguhan.
 
 | Bagian | Aturan (default) |
 |---|---|
-| Discovery | token launchpad umur 2–60 menit, mcap $20–150 rb, minimal 50 holder dan likuiditas $5 rb. Tanpa syarat smart money, dev, bundle, atau jiplakan |
+| Discovery | token launchpad (termasuk stonkfun) umur 2–60 menit yang sudah tembus mcap $100 rb (band $100 rb–$1 jt), minimal 50 holder dan likuiditas $5 rb, dev ≤ 30%, top 10 ≤ 70% |
+| Gerbang | titik tembus $100 rb harus lolos gerbang runner (`gate.ts`): volume 5 menit ≥ $15 rb, tembus ≥ 1 menit setelah launch, naik ≤ +200% dalam 5 menit, dan bukan bot ramp (≤ 80% candle hijau). Lalu cek funding: tidak boleh ada ≥ 5 wallet trader yang di-funding dalam 10 menit yang sama atau dari satu alamat yang sama sebelum titik tembus. Token yang mcap-nya sudah lebih dari 2× titik tembus dilewati. Bundle dan fresh wallet **tidak** dipakai sebagai alasan menolak, karena runner justru banyak bundle-nya |
 | Tracking | minimal 3 scan / 40 detik; gagal hanya kalau likuiditas turun lebih dari 25% |
 | Paper trading | modal $140, **10% ekuitas per transaksi**, maksimal **8 posisi** terbuka (alert berikutnya dilewati dan dihitung), **TP +100%** (jual semua), **SL −30%**, tutup paksa setelah **180 menit**, biaya 1,5% per sisi |
 | Jurnal | hanya token yang sedang dipegang, tiap 30 detik; berhenti saat posisi ditutup |

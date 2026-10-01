@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cfg } from "./config.js";
 import { GmgnApi, type RankRow } from "./gmgn.js";
-import { GATE, peakMcap, runnerGate } from "./gate.js";
+import { GATE, fundingFlags, peakMcap, runnerGate } from "./gate.js";
 import { now } from "./store.js";
 
 const env = (k: string, d: number) => (process.env[k] ? Number(process.env[k]) : d);
@@ -39,6 +39,9 @@ interface Tracked {
   ageMin?: number;
   volume5m?: number;
   change5m?: number;
+  greenShare?: number | null;
+  fundedTogether?: number;
+  sameFunder?: number;
   reasons?: string[];
   // outcome, filled TRACK_DAYS after the cross
   peakMcap?: number;
@@ -90,6 +93,11 @@ async function round(db: Record<string, Tracked>): Promise<void> {
       const g = runnerGate(K, supply, r.createdAt, t);
       db[r.address] = { symbol: r.symbol, launchpad: r.launchpad, createdAt: r.createdAt, supply, ...g, status: g.status };
       if (g.status === "pass" || g.status === "fail") {
+        const f = fundingFlags(await api.traderFunding(cfg.chain, r.address, 100), r.createdAt, g.crossAt);
+        const reasons = [...g.reasons, ...f.reasons];
+        Object.assign(db[r.address], { fundedTogether: f.fundedTogether, sameFunder: f.sameFunder, reasons, status: reasons.length ? "fail" : "pass" });
+        g.reasons = reasons;
+        g.status = reasons.length ? "fail" : "pass";
         added++;
         console.log(`[track] ${g.status.toUpperCase()} ${r.symbol} (${r.launchpad}) crossed $100K at ${g.ageMin.toFixed(1)}m, ` +
           `5m vol $${Math.round(g.volume5m / 1000)}K, 5m ${g.change5m >= 0 ? "+" : ""}${Math.round(g.change5m * 100)}%` + (g.reasons.length ? ` — ${g.reasons.join(", ")}` : ""));
@@ -122,15 +130,17 @@ export function report(db: Record<string, Tracked>, t = now()): string {
     const m1 = done.filter((x) => (x.peakMcap ?? 0) >= 1e6).length;
     const m10 = done.filter((x) => (x.peakMcap ?? 0) >= 1e7).length;
     const rate = m10 ? `1 in ${Math.round(done.length / m10)}` : done.length ? `0 of ${done.length}` : "-";
-    return `${label.padEnd(14)} recorded ${String(xs.length).padStart(5)} | resolved ${String(done.length).padStart(5)} | reached $1M ${String(m1).padStart(4)} | reached $10M ${String(m10).padStart(3)} (${rate})`;
+    return `${label.padEnd(18)} recorded ${String(xs.length).padStart(5)} | resolved ${String(done.length).padStart(5)} | reached $1M ${String(m1).padStart(4)} | reached $10M ${String(m10).padStart(3)} (${rate})`;
   };
   const pass = all.filter((x) => x.status === "pass");
   const fail = all.filter((x) => x.status === "fail");
   const days = all.length ? (t - Math.min(...all.map((x) => x.crossAt!))) / 86400 : 0;
+  const reasonLines = [...new Set(fail.flatMap((x) => x.reasons ?? []))].sort().map((r) => line(`  ${r}`, fail.filter((x) => x.reasons?.includes(r))));
   return [
     `Runner tracker — tokens that crossed $100K in their first hour, outcome ${DAYS} days later (${days.toFixed(1)} days of data)`,
     line("gate PASS", pass),
     line("gate FAIL", fail),
+    ...(reasonLines.length ? ["failed because of (a token can have several reasons; a rule that removes runners shows up here):", ...reasonLines] : []),
     "Break-even for 'half at 2x, hold the rest to -30%': about 1 runner ($10M) in 100 gate passers; 1 in 50 is clearly profitable.",
     "Trust it only after a few hundred resolved passers: one runner more or less moves the rate a lot.",
   ].join("\n");

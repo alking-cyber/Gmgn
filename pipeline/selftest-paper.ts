@@ -8,11 +8,13 @@ import { Paper, emptyPaper, type PaperClose, type PaperPartial } from "./paper.j
 
 assert.equal(cfg.profile, "loose", "run with PIPELINE_PROFILE=loose");
 assert.equal(cfg.paper.enabled, true);
-assert.equal(cfg.s1.minMcap, 20_000);
-assert.equal(cfg.s1.maxMcap, 150_000);
+assert.equal(cfg.s1.minMcap, 100_000);
+assert.equal(cfg.s1.maxMcap, 1_000_000);
+assert.equal(cfg.s3.runnerGate, true);
+assert.equal(cfg.s3.fundingCheck, true);
 assert.equal(cfg.s3.minHoldingSmart, 0);
 assert.equal(cfg.s3.minKolPlusSmart, 0);
-console.log("  ✓ loose profile: $20-150K band, no smart-money requirement, paper trading on");
+console.log("  ✓ loose profile: entry at the $100K cross through the runner gate + funding checks, no smart-money requirement, paper trading on");
 
 assert.equal(cfg.paper.runner.enabled, true, "loose keeps half of every take-profit by default");
 // cases 1-5: plain book (runner hold off)

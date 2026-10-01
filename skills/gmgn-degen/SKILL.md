@@ -65,6 +65,9 @@ gmgn-cli market hot-searches --chain sol --interval 1h --limit 100 --raw        
 # runner gate: 1m candles from launch (100 per call; enough while the token crossed $100K in its first 100 minutes)
 gmgn-cli market kline --chain sol --address <ADDR> --resolution 1m --from <created_ts> --to <created_ts+6000> --raw
 
+# funding check: who funded the biggest buyers, and when (Step 3c)
+gmgn-cli token traders --chain sol --address <ADDR> --order-by buy_volume_cur --limit 100 --raw
+
 # per-token deep check
 gmgn-cli token info --chain sol --address <ADDR> --raw
 gmgn-cli token security --chain sol --address <ADDR> --raw
@@ -93,6 +96,8 @@ Measured on 161 Solana launchpad tokens that launched below $200K and crossed $1
 5. **Launchpad**: stonkfun produced half the $10M+ runners while launching about a third of the sample (this can change; re-check with `runners`).
 6. **Inflated launches are not runners**: a token that opens far above $100K (seen at $115M and $888M) did not "run" there. Ignore tokens whose first candle is already above $200K when learning, and treat an opening price far above the band with suspicion when scanning.
 7. **Volume into the cross was the strongest separator**: median $50K in the 5 minutes into $100K for runners vs $26K for ordinary tokens. Points 2, 4 and 7 form the runner gate (Step 3b).
+
+8. **Wallet funding beats bubble maps.** Among ordinary tokens, five or more wallets funded inside one 10-minute window before the cross (or five from one plain address) marked tokens that did worse, while bundle-tagged wallets did not — runners were heavily bundled. Fresh-wallet counts did not separate anything.
 
 Points 1–3, 5 and 6 come from one month of survivors; points 4 and 7 compare them with an age-based sample of ordinary tokens, which contained no stonkfun tokens (the trenches default leaves stonkfun out), so the gate is unmeasured on stonkfun's ordinary tokens. Say so when presenting scores.
 
@@ -137,13 +142,13 @@ Everything else stays, however risky. Report how many were dropped and why (one 
 
 ### Step 3 — Runner score (0–100), from list rows
 
+Only components that do not contradict the data. Removed on purpose: smart-money bonuses (runners had *fewer* smart wallets at $100K than ordinary tokens, median 1 vs 2), Twitter-link points (87% of runners vs 88% of ordinary tokens have one), short-term momentum points (the gate in Step 3b handles volume and vertical moves), and any bundle / bubble-map penalty (see Step 3c).
+
 | Component | Points | Rule |
 |---|---|---|
-| Narrative | up to 25 | +10 if it has the most `holder_count` among tokens with the same symbol (case-insensitive) in the universe; +5 if `image_dup + twitter_dup` ≥ 3, +10 if ≥ 10 (a theme others copy); +5 if its symbol or name appears in `hot-searches` |
-| Launch | up to 15 | launchpad (`launchpad_platform`/`launchpad`) stonkfun +8, Pump.fun +5, other +3; age ≤ 6h +4 (still early in its first run); has a Twitter/X link +3 (87% of runners and 88% of ordinary tokens have one, so this is weak) |
-| Momentum quality | up to 25 | holders per minute of age (`holder_count / age_min`): ≥ 10 → +10, ≥ 3 → +6, ≥ 1 → +3; `buys > sells` in the row's window +5; short-term change (`price_change_percent5m` or `price_change_percent1h`) between +10% and +150% → +10, above +300% → +0 and flag "vertical" |
-| Smart flow | up to 15 | `smart_degen_count + renowned_count` on the row: ≥ 1 → +5, ≥ 3 → +10, ≥ 6 → +15 (bonus only) |
-| Room | up to 20 | mcap $80K–$300K +12, $300K–$1M +7; at or near ATH (`market_cap ≥ 0.7 × history_highest_market_cap`) +8, more than 60% below ATH −10 |
+| Narrative | up to 40 | +15 if it has the most `holder_count` among tokens with the same symbol (case-insensitive) in the universe; +10 if `image_dup + twitter_dup` ≥ 3, +15 if ≥ 10 (a theme others copy); +10 if its symbol or name appears in `hot-searches` |
+| Launch | up to 25 | launchpad (`launchpad_platform`/`launchpad`) stonkfun +15, Pump.fun +10, other +5; age ≤ 6h +10 (still early in its first run) |
+| Room | up to 35 | mcap $100K–$300K +20, $300K–$1M +10; at or near ATH (`market_cap ≥ 0.7 × history_highest_market_cap`) +15, more than 60% below ATH −15 |
 | Penalties | | top-10 > 0.30 −5, > 0.50 −10; `rug_ratio` > 0.5 −5; `creator_created_count` ≥ 100 −5 (bot deployer) |
 
 Rank by score and take the top 20 for Step 3b.
@@ -157,6 +162,7 @@ For each of the top 20 (sequentially, 2 units each), fetch 1m candles from launc
 | Volume into the cross | sum of `volume` of that candle and the 4 before it **≥ $15,000** | Real demand; thin crosses are mostly one wallet pushing price |
 | Not instant | crossed **≥ 1 minute** after creation | Tokens pumped through $100K in their first minute are mostly bundled dumps |
 | Not vertical | close of that candle / close 5 candles earlier − 1 **≤ +200%** | Steady climbs ran further than vertical spikes |
+| Not a bot ramp | among the (up to) 15 candles into the cross, at most **80% closed higher than the one before** — only when there are at least 4 | A smooth staircase with no pullbacks is volume bots. Kept all 8 runners that had 4+ candles; dropped 22 of 56 ordinary tokens, which averaged −43% per trade vs −27% for the rest |
 
 Measured at the $100K moment (no hindsight): **11 of the 15 tokens that ran from $100K to $10M+ in the 30 days before 2026-10-01 passed, while only 24% of 179 ordinary tokens that crossed $100K (age-based sample, dead ones included) did** — about 3× more runners per pick (roughly 1 in 300 → 1 in 100). On the same ordinary tokens, the 2× / −30% trade improved from about −6% to −3% per trade. It still did not make holding without a stop profitable (that needs about 1 runner in 65 picks). The 4 runners it missed: ZCAT and BTC crossed $100K in their first minute with almost no volume, MASK crossed in its first minute, AGI went +534% in the 5 minutes into the cross. The gate is a filter on odds, not a guarantee; ZCAT (1,835×) would have been missed.
 
@@ -165,6 +171,19 @@ Measured at the $100K moment (no hindsight): **11 of the 15 tokens that ran from
 - **Not crossed yet** ($80K–$100K now) → "pending", re-run `check` once it crosses.
 - **Launched at or above $200K** (first candle) → inflated launch, fail.
 
+### Step 3c — Wallet funding (for the gate passers)
+
+`token traders --chain sol --address <ADDR> --order-by buy_volume_cur --limit 100 --raw` (5 units). Each row's `native_transfer` is how the wallet got its SOL: `timestamp`, `from_address`, and `name` (an exchange name such as "Binance", or null for a plain wallet). Use only funding between 24 hours before the token's creation and the $100K cross:
+
+| Red flag | Drop when | Why |
+|---|---|---|
+| Time-linked funding | **5 or more wallets funded inside one 10-minute window** | One operator splitting buys across wallets (or fake volume). On 166 ordinary tokens it dropped 11 that averaged −34% (vs −26%) and no runner |
+| One funder | **5 or more wallets funded from the same non-exchange address** | Same operator; an exchange hot wallet funds thousands of unrelated people, so `name` set = not a flag |
+
+Not red flags here, because the data says otherwise — say so if the user asks about them:
+- **Bundles / connected bubbles in a bubble map**: every one of the 15 runners had dozens of bundler-tagged wallets, and bundled ordinary tokens did *better* (+16% vs −17% per trade). A bundle kill would have removed all runners. Report it as a risk note and size small.
+- **Fresh wallets**: ordinary tokens with many fresh wallets did not do worse. Report the count only.
+
 Take the 8 best-scoring passers to Step 4.
 
 ### Step 4 — Deep check the top 8 (sequentially)
@@ -172,9 +191,9 @@ Take the 8 best-scoring passers to Step 4.
 For each: `token info`, `token holders --tag smart_degen`, `token holders --tag renowned`, `token holders --limit 40`.
 
 - Market cap now = `price.price × circulating_supply`. Entry market cap of a holder = `avg_cost × circulating_supply`.
-- **Smart/KOL holding now**: rows with `usd_value > 20` across both tagged lists (dedupe by address). +5 to the score per wallet, max +15. Note their entry market caps.
+- **Smart/KOL holding now**: rows with `usd_value > 20` across both tagged lists (dedupe by address). Report the count and their entry market caps; no score points (runners had fewer smart wallets at $100K, not more).
 - **Supply map** from the plain list: skip `addr_type == 2` (pools). Rows with a non-empty `name`, null `avg_cost` and `buy_tx_count_cur == 0` are program vaults — report as locked supply, don't count as whales. Biggest remaining holder > 0.15 → −10 and flag; > 0.30 → move to the bottom with "one wallet can dump it".
-- **Underwater holders**: median entry of the top 20 traders > 1.5 × market cap now → −10 and flag "bagholders will sell into every bounce".
+- **Underwater holders**: median entry of the top 20 traders > 1.5 × market cap now → flag "bagholders will sell into every bounce" (no score change; untested).
 - **Flow**: `price.buys_1h` vs `price.sells_1h`; distance from ATH (`ath_price × circulating_supply`). For tokens younger than an hour, ignore `price.price_1h` (it is the launch price).
 
 ### Step 5 — Output
@@ -196,7 +215,7 @@ Re-rank by the updated score. Label: **HIGH** ≥ 65, **MEDIUM** 45–64, **SPEC
 ## Mode `check` — one token, am I the exit liquidity?
 
 1. Name given → `market search --query <NAME> --chain sol`; if several share it, list them (mcap, holders) and ask which, or hand off to `gmgn-token-buy` for copycat disambiguation.
-2. Run `token info`, `token security` and the three `token holders` calls; apply Step 2 hard kills, compute the runner score (Steps 3–4 using `token info` fields: `stat.top_10_holder_rate`, `stat.dev_team_hold_rate`, `stat.top_bundler_trader_percentage`, `stat.creator_created_count`, `image_dup_count`, `wallet_tags_stat.smart_wallets`, `wallet_tags_stat.renowned_wallets`).
+2. Run `token info`, `token security` and the three `token holders` calls; apply Step 2 hard kills, the runner gate (Step 3b, from 1m candles since launch) and the funding check (Step 3c), and compute the runner score (Step 3, with the Step 4 facts). A token that fails the gate or the funding check gets `SKIP` with the reason, whatever its score.
 3. Answer:
 
 ```
@@ -297,7 +316,7 @@ Evidence, to state when asked: with 5-minute volume as the only check this impro
 ### #<rank> <SYMBOL> — <SCORE>/100 <HIGH|MEDIUM|SPECULATIVE>
 `<address>` · age <age> · mcap $<x> (ATH $<ath>) · liq $<y> · holders <n> (<h>/min) · <launchpad>
 Narrative: <leader of "<theme>" with <k> clones | original | copy of <leader>> · hot-search: <yes/no>
-Smart/KOL holding: <n> ($<total>, entries $<a>–$<b>) · Biggest wallet <p>% · Bundle <b>% · Vault <v>%
+Gate: pass (vol $<v>K, <n>% green into the cross) · Funding: <ok | n wallets funded together / one funder> · Biggest wallet <p>% · Bundle <b>% (risk note) · Fresh <f> · Smart/KOL <n>
 For: <strongest reason> · Risk: <biggest risk>
 Plan: size 3–5% · SL $<0.7×mcap> · sell 50% at $<2×mcap> · hold the rest, exit only at $<0.7×mcap>
 ```

@@ -16,9 +16,11 @@ import "../src/config.js";
  *   trending  (default) established trending tokens, the 4-stage design from the post
  *   newlaunch launchpad tokens under an hour old in a small market-cap band, alerting
  *             only when smart money / KOLs still hold and the holder base is not underwater
- *   loose     launchpad tokens under an hour old in a $20-150K band with almost no filters,
- *             paper-traded with a +100% take-profit / -30% stop (the setup that held up in the
- *             age-based replay; unproven live — that is what the paper trading is for)
+ *   loose     the replay-tested runner strategy: launchpad tokens under an hour old that crossed
+ *             $100K market cap, entered only if that cross passes the runner gate and the funding
+ *             checks (gate.ts); paper-traded with half sold at +100% and half held to −30% from
+ *             entry (break-even in the replay blend at one $10M runner per 100 trades — unproven
+ *             live, which is what the paper trading and `pipeline:runners` are for)
  */
 const PROFILE = process.env.PIPELINE_PROFILE || "trending";
 if (!["trending", "newlaunch", "loose"].includes(PROFILE)) {
@@ -68,8 +70,8 @@ export const cfg = {
   trenches: {
     types: list("TRENCH_TYPES", ["new_creation", "near_completion", "completed"]),
     limit: num("TRENCH_LIMIT", 80),
-    minMcap: num("TRENCH_MIN_MCAP", 10_000),
-    maxMcap: num("TRENCH_MAX_MCAP", 300_000),
+    minMcap: num("TRENCH_MIN_MCAP", pd(10_000, 10_000, 80_000)),
+    maxMcap: num("TRENCH_MAX_MCAP", pd(300_000, 300_000, 1_000_000)),
     maxCreated: str("TRENCH_MAX_CREATED", "120m"),
     // Launchpads the service leaves out of its default list, polled with one extra call each.
     // stonkfun is not in the default list, yet it launched 7 of the 15 tokens that ran from
@@ -87,10 +89,11 @@ export const cfg = {
     maxAgeMin: num("S1_MAX_AGE_MIN", pd(24 * 60, 60)),
     minHolders: num("S1_MIN_HOLDERS", pd(150, 80, 50)),
     minLiquidityUsd: num("S1_MIN_LIQUIDITY_USD", pd(10_000, 8_000, 5_000)),
-    minMcap: num("S1_MIN_MCAP", pd(0, 30_000, 20_000)),
-    maxMcap: num("S1_MAX_MCAP", pd(0, 60_000, 150_000)),
-    maxTop10Rate: num("S1_MAX_TOP10_RATE", pd(0.3, 0.3, 1)),
-    maxDevHoldRate: num("S1_MAX_DEV_HOLD_RATE", pd(0.05, 0.05, 1)),
+    // loose: the tested entry is the first $100K cross (checked by the runner gate in stage 3)
+    minMcap: num("S1_MIN_MCAP", pd(0, 30_000, 100_000)),
+    maxMcap: num("S1_MAX_MCAP", pd(0, 60_000, 1_000_000)),
+    maxTop10Rate: num("S1_MAX_TOP10_RATE", pd(0.3, 0.3, 0.7)),
+    maxDevHoldRate: num("S1_MAX_DEV_HOLD_RATE", pd(0.05, 0.05, 0.3)),
     maxBundlerRate: num("S1_MAX_BUNDLER_RATE", pd(1, 0.3, 1)),
     maxSniperHoldRate: num("S1_MAX_SNIPER_HOLD_RATE", pd(1, 0.15, 1)),
     maxInsiderRate: num("S1_MAX_INSIDER_RATE", pd(1, 0.15, 1)),
@@ -141,6 +144,11 @@ export const cfg = {
     maxTop20EntryMult: num("S3_MAX_TOP20_ENTRY_MULT", pd(0, 1.3, 0)),
     // and no single non-pool wallet above this share of supply.
     maxSingleHolderPct: num("S3_MAX_SINGLE_HOLDER_PCT", pd(0, 0.15, 0)),
+    // Runner gate (gate.ts) at the token's first $100K cross: volume, not instant, not vertical,
+    // not a bot ramp; plus the wallet-funding checks (wallets funded together / by one funder).
+    runnerGate: bool("S3_RUNNER_GATE", pd(false, false, true)),
+    fundingCheck: bool("S3_FUNDING_CHECK", pd(false, false, true)),
+    maxChaseMult: num("S3_MAX_CHASE_MULT", 2), // skip when market cap is already above 2x the cross
   },
 
   // ---- Stage 4: journal ----
