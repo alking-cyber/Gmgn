@@ -157,18 +157,19 @@ export class Pipeline {
     if (this.cfg.source === "trenches") {
       if (!this.src.trenches) throw new Error("PIPELINE_SOURCE=trenches but the data source has no trenches()");
       const q = this.cfg.trenches;
-      try {
-        const rows = await this.src.trenches(this.cfg.chain, {
-          types: q.types,
-          limit: q.limit,
-          filters: { min_marketcap: q.minMcap, max_marketcap: q.maxMcap, max_created: q.maxCreated },
-        });
-        for (const r of rows) if (!merged.has(r.address)) merged.set(r.address, r);
-        return merged;
-      } catch (err) {
-        this.log(`[scan] trenches failed: ${(err as Error).message}`);
-        return null;
+      const filters = { min_marketcap: q.minMcap, max_marketcap: q.maxMcap, max_created: q.maxCreated };
+      let ok = 0;
+      // default launchpads first, then each launchpad the default list leaves out
+      for (const platforms of [undefined, ...q.extraPlatforms.map((p) => [p])]) {
+        try {
+          const rows = await this.src.trenches(this.cfg.chain, { types: q.types, limit: q.limit, filters, platforms });
+          ok++;
+          for (const r of rows) if (!merged.has(r.address)) merged.set(r.address, r);
+        } catch (err) {
+          this.log(`[scan] trenches ${platforms ? platforms.join(",") : "default"} failed: ${(err as Error).message}`);
+        }
       }
+      return ok ? merged : null;
     }
     let ok = 0;
     for (const interval of this.cfg.rankIntervals) {

@@ -120,8 +120,10 @@ expect("NOSMART", "s3_fail", "smart_money_not_holding");
 expect("WHALE", "s3_fail", "whale_holder");
 
 assert.deepEqual(lastQuery[0].filters, { min_marketcap: cfg.trenches.minMcap, max_marketcap: cfg.trenches.maxMcap, max_created: cfg.trenches.maxCreated });
+assert.equal(lastQuery[0].platforms, undefined, "first call uses the service's default launchpads");
+assert.deepEqual(lastQuery[1].platforms, ["stonkfun"], "second call adds stonkfun, which the defaults leave out");
 assert.ok(notified[0].includes("Smart/KOL still holding 2"), "alert shows who still holds");
 assert.ok(notified[0].includes("Vault/locked 50%"), "alert shows supply parked in vaults");
-console.log("  ✓ trenches query uses the configured band; alert lists smart money still holding");
+console.log("  ✓ trenches query uses the configured band (default launchpads + stonkfun); alert lists smart money still holding");
 console.log(`\n${p.statusLine()}\nall newlaunch checks passed`);
 rmSync(dir, { recursive: true, force: true });

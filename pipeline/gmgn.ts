@@ -90,6 +90,7 @@ export interface TrenchQuery {
   types: string[];
   limit: number;
   filters: Record<string, number | string>;
+  platforms?: string[]; // launchpad filter; omitted = the service's default launchpads
 }
 
 /** What the pipeline needs from GMGN — swapped for a fake in tests. */
@@ -319,7 +320,7 @@ export class GmgnApi implements GmgnSource {
 
   async trenches(chain: string, q: TrenchQuery): Promise<RankRow[]> {
     const data = unwrap(
-      await this.call(WEIGHT.trenches, () => this.client.getTrenches(chain, q.types, undefined, q.limit, q.filters), this.rankRetries)
+      await this.call(WEIGHT.trenches, () => this.client.getTrenches(chain, q.types, q.platforms, q.limit, q.filters), this.rankRetries)
     );
     const rows: RankRow[] = [];
     for (const type of q.types) {

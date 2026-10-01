@@ -50,6 +50,20 @@ Reading it:
 5. **Speed to $100K did not separate them** (6 minutes in every group).
 6. **Launchpad mattered in this window**: stonkfun produced half of the $10M+ runners while launching about a third of the sample.
 
+## Runners vs ordinary tokens (age-based sample)
+
+The table above compares runners with other survivors. Compared instead with 179 tokens that crossed $100K in their first hour, picked by launch time with dead ones included (sessions of 2026-09-27, 2026-10-01 and tokens launched 24–42 hours before 2026-10-01), at the same $100K minute:
+
+| Feature (median) | 15 runners (crossed within 60 min) | 179 ordinary tokens |
+|---|---|---|
+| Age at $100K | 5 min | 1.8 min |
+| 5-min volume into $100K | $50K | $26K |
+| 5-min change into $100K | +48% | +48% |
+| Has a Twitter/X link | 87% | 88% |
+| Launched on stonkfun | 7 of 15 | 0 (trenches' default launchpads leave stonkfun out) |
+
+Loose gate used by `scan` (5-min volume ≥ $15K, crossed ≥ 1 minute after launch, 5-min change ≤ +200%): 11 of 15 runners pass, 24% of ordinary tokens pass. Missed: ZCAT, MASK and BTC (crossed in their first minute; ZCAT and BTC with almost no volume) and AGI (+534% in the 5 minutes into the cross). 72 gate variants were compared on these 15 runners, so the chosen one is partly fitted to them.
+
 ## Limits
 
 - Survivors only: tokens that never reached $300K are not in this data, so this explains which survivors became huge, not how many tokens die. Most launches die.

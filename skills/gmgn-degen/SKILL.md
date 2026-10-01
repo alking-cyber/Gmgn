@@ -56,10 +56,14 @@ Pick the mode from the user's wording. When unclear, run `scan`.
 ## Usage Examples
 
 ```bash
-# scan universe (both, merged by address)
+# scan universe (all three, merged by address); stonkfun is NOT in trenches' default launchpads, so ask for it separately
 gmgn-cli market trenches --chain sol --type near_completion completed --min-marketcap 80000 --max-marketcap 1000000 --max-created 1440m --limit 80 --raw
+gmgn-cli market trenches --chain sol --type near_completion completed --launchpad-platform stonkfun --min-marketcap 80000 --max-marketcap 1000000 --max-created 1440m --limit 80 --raw
 gmgn-cli market trending --chain sol --interval 5m --min-marketcap 80000 --max-marketcap 1000000 --max-created 24h --limit 100 --raw
 gmgn-cli market hot-searches --chain sol --interval 1h --limit 100 --raw          # narrative heat
+
+# runner gate: 1m candles from launch (100 per call; enough while the token crossed $100K in its first 100 minutes)
+gmgn-cli market kline --chain sol --address <ADDR> --resolution 1m --from <created_ts> --to <created_ts+6000> --raw
 
 # per-token deep check
 gmgn-cli token info --chain sol --address <ADDR> --raw
@@ -85,11 +89,12 @@ Measured on 161 Solana launchpad tokens that launched below $200K and crossed $1
 1. **Bundling and clones were MORE common among the biggest runners**, not less (bundle 35% vs 8–12%). A strict "drop bundle/rug/top-10 > 30% or any clone" rule removed 14 of the 16 tokens that went to $10M+. → Bundle and clone counts are *risk notes*, not kill rules. Being the **most-held token of a cloned theme** is a plus.
 2. **Steady climbs beat vertical spikes.** Runners rose a median +49% in the 5 minutes into $100K; tokens that stalled below $1M had spiked +80% on the most volume.
 3. **Smart money is usually not in yet at $100K** (median 1 wallet for runners vs 2 for the rest). Their presence is a bonus, never a requirement.
-4. **Speed to $100K did not matter** (6 minutes in every group), so it is not scored.
+4. **Runners took longer to reach $100K than ordinary tokens.** Against an age-based sample of 179 tokens that crossed $100K in their first hour (dead ones included), runners crossed at a median 5 minutes vs 1.8 minutes. Among survivors alone the speed looked the same (6 minutes), which is why it was missed at first.
 5. **Launchpad**: stonkfun produced half the $10M+ runners while launching about a third of the sample (this can change; re-check with `runners`).
 6. **Inflated launches are not runners**: a token that opens far above $100K (seen at $115M and $888M) did not "run" there. Ignore tokens whose first candle is already above $200K when learning, and treat an opening price far above the band with suspicion when scanning.
+7. **Volume into the cross was the strongest separator**: median $50K in the 5 minutes into $100K for runners vs $26K for ordinary tokens. Points 2, 4 and 7 form the runner gate (Step 3b).
 
-These are heuristics from one month of survivors. Say so when presenting scores.
+Points 1–3, 5 and 6 come from one month of survivors; points 4 and 7 compare them with an age-based sample of ordinary tokens, which contained no stonkfun tokens (the trenches default leaves stonkfun out), so the gate is unmeasured on stonkfun's ordinary tokens. Say so when presenting scores.
 
 ---
 
@@ -97,7 +102,7 @@ These are heuristics from one month of survivors. Say so when presenting scores.
 
 ### Step 1 — Universe
 
-Run the `trenches` and `trending` commands from Usage Examples, merge rows by `address`. Keep `market_cap` between $80K and $1M and age ≤ 24h. Run `hot-searches` once for narrative heat.
+Run the three universe commands from Usage Examples (trenches with the default launchpads, trenches with `--launchpad-platform stonkfun`, trending), merge rows by `address`. Without the second call stonkfun tokens only appear through trending — and stonkfun launched 7 of the 15 recent $100K → $10M+ runners. Keep `market_cap` between $80K and $1M and age ≤ 24h. Run `hot-searches` once for narrative heat.
 
 Field names differ by source (checked against live responses):
 
@@ -135,13 +140,32 @@ Everything else stays, however risky. Report how many were dropped and why (one 
 | Component | Points | Rule |
 |---|---|---|
 | Narrative | up to 25 | +10 if it has the most `holder_count` among tokens with the same symbol (case-insensitive) in the universe; +5 if `image_dup + twitter_dup` ≥ 3, +10 if ≥ 10 (a theme others copy); +5 if its symbol or name appears in `hot-searches` |
-| Launch | up to 15 | launchpad (`launchpad_platform`/`launchpad`) stonkfun +8, Pump.fun +5, other +3; age ≤ 6h +4 (still early in its first run); has a Twitter/X link +3 |
+| Launch | up to 15 | launchpad (`launchpad_platform`/`launchpad`) stonkfun +8, Pump.fun +5, other +3; age ≤ 6h +4 (still early in its first run); has a Twitter/X link +3 (87% of runners and 88% of ordinary tokens have one, so this is weak) |
 | Momentum quality | up to 25 | holders per minute of age (`holder_count / age_min`): ≥ 10 → +10, ≥ 3 → +6, ≥ 1 → +3; `buys > sells` in the row's window +5; short-term change (`price_change_percent5m` or `price_change_percent1h`) between +10% and +150% → +10, above +300% → +0 and flag "vertical" |
 | Smart flow | up to 15 | `smart_degen_count + renowned_count` on the row: ≥ 1 → +5, ≥ 3 → +10, ≥ 6 → +15 (bonus only) |
 | Room | up to 20 | mcap $80K–$300K +12, $300K–$1M +7; at or near ATH (`market_cap ≥ 0.7 × history_highest_market_cap`) +8, more than 60% below ATH −10 |
 | Penalties | | top-10 > 0.30 −5, > 0.50 −10; `rug_ratio` > 0.5 −5; `creator_created_count` ≥ 100 −5 (bot deployer) |
 
-Rank by score and take the top 8 for Step 4.
+Rank by score and take the top 20 for Step 3b.
+
+### Step 3b — Runner gate (loose: keeps most runners, drops most pump-and-dumps)
+
+For each of the top 20 (sequentially, 2 units each), fetch 1m candles from launch (Usage Examples). Supply = `market_cap / price` from the row. Find the first candle whose `close × supply ≥ $100,000` — the moment the token first crossed $100K — and measure, using only candles up to that one:
+
+| Gate | Pass when | Why |
+|---|---|---|
+| Volume into the cross | sum of `volume` of that candle and the 4 before it **≥ $15,000** | Real demand; thin crosses are mostly one wallet pushing price |
+| Not instant | crossed **≥ 1 minute** after creation | Tokens pumped through $100K in their first minute are mostly bundled dumps |
+| Not vertical | close of that candle / close 5 candles earlier − 1 **≤ +200%** | Steady climbs ran further than vertical spikes |
+
+Measured at the $100K moment (no hindsight): **11 of the 15 tokens that ran from $100K to $10M+ in the 30 days before 2026-10-01 passed, while only 24% of 179 ordinary tokens that crossed $100K (age-based sample, dead ones included) did** — about 3× more runners per pick (roughly 1 in 300 → 1 in 100). On the same ordinary tokens, the 2× / −30% trade improved from about −6% to −3% per trade. It still did not make holding without a stop profitable (that needs about 1 runner in 65 picks). The 4 runners it missed: ZCAT and BTC crossed $100K in their first minute with almost no volume, MASK crossed in its first minute, AGI went +534% in the 5 minutes into the cross. The gate is a filter on odds, not a guarantee; ZCAT (1,835×) would have been missed.
+
+- **Pass** → continues to Step 4.
+- **Fail** → listed in one line at the end ("failed runner gate: SYMBOL (reason), …"), no card. A token with a strong narrative that fails only on volume may be shown as WATCH with the reason.
+- **Not crossed yet** ($80K–$100K now) → "pending", re-run `check` once it crosses.
+- **Launched at or above $200K** (first candle) → inflated launch, fail.
+
+Take the 8 best-scoring passers to Step 4.
 
 ### Step 4 — Deep check the top 8 (sequentially)
 

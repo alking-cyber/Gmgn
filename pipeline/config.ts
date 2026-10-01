@@ -71,6 +71,10 @@ export const cfg = {
     minMcap: num("TRENCH_MIN_MCAP", 10_000),
     maxMcap: num("TRENCH_MAX_MCAP", 300_000),
     maxCreated: str("TRENCH_MAX_CREATED", "120m"),
+    // Launchpads the service leaves out of its default list, polled with one extra call each.
+    // stonkfun is not in the default list, yet it launched 7 of the 15 tokens that ran from
+    // $100K to $10M+ in the 30 days before 2026-10-01. Empty to skip.
+    extraPlatforms: list("TRENCH_EXTRA_PLATFORMS", ["stonkfun"]),
   },
   // Each scan polls every interval below and merges the results.
   rankIntervals: list("RANK_INTERVALS", ["1m", "5m"]),

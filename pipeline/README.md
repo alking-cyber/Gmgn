@@ -47,7 +47,7 @@ npm run pipeline:newlaunch                         # atau: PIPELINE_PROFILE=newl
 PIPELINE_PROFILE=newlaunch npm run pipeline:evaluate
 ```
 
-Profil ini memantau token launchpad (`/v1/trenches`: new, near completion, completed) tiap 20 detik, dan datanya disimpan terpisah di `data-newlaunch/`.
+Profil ini memantau token launchpad (`/v1/trenches`: new, near completion, completed) tiap 20 detik, dan datanya disimpan terpisah di `data-newlaunch/`. Daftar launchpad bawaan trenches tidak memasukkan stonkfun, padahal 7 dari 15 runner $100 rb → $10 jt+ dalam 30 hari terakhir berasal dari sana. Karena itu setiap scan menambah satu panggilan khusus untuk stonkfun (`TRENCH_EXTRA_PLATFORMS`, kosongkan untuk mematikan).
 
 | Tahap | Aturan (default) |
 |---|---|
