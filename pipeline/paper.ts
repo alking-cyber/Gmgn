@@ -11,16 +11,18 @@
  *   - time stop: sells at the polled price after maxHoldMin
  *   - costPct is charged on entry and on exit (slippage + fees)
  *
- * Runner hold (config.paper.runner, when enabled): when the take-profit is reached, the token's
- * strength is checked with the latest token info — holders up at least minHolderGrowth since the
- * buy, 5-minute volume at least minVolume5m, and smart money + KOL wallets not fewer than at the
- * buy. Strong: sell (1 - keepPct) at the take-profit and keep the rest. Weak: sell everything as usual.
- * The kept part exits on the first of:
- *   - price falls trailPct below its highest polled price (never below the entry price: it cannot lose)
- *   - holders fall holderDropPct below their highest count since the buy (holders are leaving)
- *   - maxHoldMin from the take-profit
- * In the 151-trade replay with volume as the only check (holders were not available historically)
- * this improved the average trade by about one point; the holder checks are unproven until paper data says so.
+ * Runner hold (config.paper.runner, when enabled): at the take-profit, sell (1 - keepPct) and keep
+ * the rest so a runner can pay for the losers. Default: sell half at 2x (the stake comes back) and
+ * hold the other half with no target; it exits only if price falls to stopX × entry (−30%), or after
+ * maxHoldMin. Kept halves do not count toward maxOpen (they would block new trades for days).
+ * Optional extras, off by default (each 0/false = off):
+ *   - keep only when strong: holders up minHolderGrowth since the buy, 5-minute volume ≥ minVolume5m,
+ *     smart money + KOL not fewer than at the buy (smartNotFewer)
+ *   - trailPct: also exit trailPct below the highest polled price
+ *   - holderDropPct: also exit when holders fall that far below their high
+ * Why the default: blending 43 ordinary gated trades with the 11 gated $10M+ runners, "half at 2x,
+ * hold the rest" broke even at one runner per 100 trades and earned at one per 50, while a 2x
+ * full exit or a 30–50% trailing stop lost at every runner rate (they cut runners at 2–7x).
  */
 
 import type { PipelineConfig } from "./config.js";
@@ -67,7 +69,7 @@ export const emptyPaper = (capital: number): PaperState => ({
   skipped: 0,
 });
 
-export type ExitReason = "take_profit" | "stop_loss" | "time_stop" | "runner_trail" | "runner_holders_leaving" | "runner_time";
+export type ExitReason = "take_profit" | "stop_loss" | "time_stop" | "runner_stop" | "runner_trail" | "runner_holders_leaving" | "runner_time";
 
 /** Part of a position sold at the take-profit while the rest is kept as a runner. */
 export interface PaperPartial {
@@ -102,7 +104,7 @@ export class Paper {
   /** Opens a position on an alert. Returns undefined when already holding it, full, or out of cash. */
   open(address: string, symbol: string, price: number, t: number, entry?: Strength): PaperPosition | undefined {
     if (this.s.positions[address] || !(price > 0)) return undefined;
-    if (Object.keys(this.s.positions).length >= this.c.maxOpen) {
+    if (Object.values(this.s.positions).filter((x) => !x.runner).length >= this.c.maxOpen) {
       this.s.skipped = (this.s.skipped ?? 0) + 1;
       return undefined;
     }
@@ -128,7 +130,7 @@ export class Paper {
     let exitX = x;
     if (x >= this.c.takeProfit) {
       const why = this.strong(p, now);
-      if (why) return this.keepRunner(address, p, t, x, now!, why);
+      if (why) return this.keepRunner(address, p, t, x, now, why);
       reason = "take_profit";
       exitX = this.c.takeProfit; // limit order fills at its level, never better
     } else if (x <= this.c.stopLoss) {
@@ -140,22 +142,25 @@ export class Paper {
     return this.close(address, reason, p.entryPrice * exitX, t);
   }
 
-  /** Returns why the token counts as still strong, or undefined (runner hold off, no data, or weak). */
+  /** Returns why the rest is kept, or undefined (runner hold off, or a strength check enabled and failed). */
   private strong(p: PaperPosition, now?: Strength): string | undefined {
     const r = this.c.runner;
-    if (!r.enabled || !p.entry || !now) return undefined;
+    if (!r.enabled) return undefined;
+    const checks = r.minHolderGrowth > 0 || r.minVolume5m > 0 || r.smartNotFewer;
+    if (!checks) return "runner hold";
+    if (!p.entry || !now) return undefined;
     const growth = p.entry.holders > 0 ? now.holders / p.entry.holders - 1 : 0;
-    if (growth < r.minHolderGrowth) return undefined;
+    if (r.minHolderGrowth > 0 && growth < r.minHolderGrowth) return undefined;
     if (now.volume5m < r.minVolume5m) return undefined;
-    if (now.smartPlusKol < p.entry.smartPlusKol) return undefined;
+    if (r.smartNotFewer && now.smartPlusKol < p.entry.smartPlusKol) return undefined;
     return `holders +${Math.round(growth * 100)}%, 5m volume $${Math.round(now.volume5m / 1000)}K, smart+KOL ${now.smartPlusKol}`;
   }
 
-  private keepRunner(address: string, p: PaperPosition, t: number, x: number, now: Strength, why: string): PaperPartial {
+  private keepRunner(address: string, p: PaperPosition, t: number, x: number, now: Strength | undefined, why: string): PaperPartial {
     const soldFrac = 1 - this.c.runner.keepPct;
     const proceeds = p.size * soldFrac * ((this.c.takeProfit * (1 - this.cost)) / (1 + this.cost));
     this.s.cash += proceeds;
-    p.runner = { keptFrac: this.c.runner.keepPct, realized: proceeds, since: t, peakPrice: p.entryPrice * x, peakHolders: now.holders };
+    p.runner = { keptFrac: this.c.runner.keepPct, realized: proceeds, since: t, peakPrice: p.entryPrice * x, peakHolders: now?.holders ?? 0 };
     return { address, symbol: p.symbol, price: p.entryPrice * this.c.takeProfit, soldFrac, proceeds, why };
   }
 
@@ -165,10 +170,10 @@ export class Paper {
     const price = p.entryPrice * x;
     run.peakPrice = Math.max(run.peakPrice, price);
     if (now) run.peakHolders = Math.max(run.peakHolders, now.holders);
-    const stop = Math.max(p.entryPrice, run.peakPrice * (1 - r.trailPct));
+    const stop = Math.max(p.entryPrice * r.stopX, r.trailPct > 0 ? run.peakPrice * (1 - r.trailPct) : 0);
     let reason: ExitReason | undefined;
-    if (price <= stop) reason = "runner_trail"; // fills at the observed price, like the stop-loss
-    else if (now && now.holders <= run.peakHolders * (1 - r.holderDropPct)) reason = "runner_holders_leaving";
+    if (price <= stop) reason = r.trailPct > 0 && stop > p.entryPrice * r.stopX ? "runner_trail" : "runner_stop"; // fills at the observed price
+    else if (r.holderDropPct > 0 && now && now.holders <= run.peakHolders * (1 - r.holderDropPct)) reason = "runner_holders_leaving";
     else if (t - run.since >= r.maxHoldMin * 60) reason = "runner_time";
     if (!reason) return undefined;
     return this.close(address, reason, price, t);
@@ -219,7 +224,7 @@ export class Paper {
     const wr = this.s.trades ? `${Math.round((this.s.wins / this.s.trades) * 100)}%` : "-";
     return (
       `paper: equity $${this.equity().toFixed(2)} (cash $${this.s.cash.toFixed(2)}, ${open} open) · ` +
-      `${this.s.trades} closed, win ${wr}, max drawdown ${(this.s.maxDrawdown * 100).toFixed(0)}%, ` +
+      `${this.s.trades} closed, win ${wr}, ${Object.values(this.s.positions).filter((x) => x.runner).length} runners held, max drawdown ${(this.s.maxDrawdown * 100).toFixed(0)}%, ` +
       `${this.s.skipped ?? 0} alerts skipped (max ${this.c.maxOpen} open)`
     );
   }

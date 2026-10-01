@@ -77,21 +77,27 @@ Profil ini **tidak mengirim order sungguhan.** Setiap alert membuka posisi simul
 
 Cara transaksi simulasi diisi: TP terisi tepat di levelnya (limit order); SL terisi di harga pertama yang terlihat di bawah level (kalau harga melompat, rugi lebih besar dari −30%); harga dicek tiap 30 detik.
 
-**Tahan runner (default aktif di profil ini).** Saat TP +100% tersentuh, pipeline mengecek token dengan data `token info` terbaru. Token dianggap masih kuat kalau semua syarat ini terpenuhi:
-- holder naik minimal 20% sejak beli;
-- volume 5 menit minimal $30 rb;
-- jumlah wallet smart money + KOL tidak berkurang.
+**Tahan runner (default aktif di profil ini).** Saat TP +100% tersentuh, 50% posisi dijual (modal kembali), dan 50% sisanya ditahan **tanpa target**. Sisa itu hanya dijual kalau harga turun ke −30% dari harga beli, atau setelah 7 hari. Tidak ada trailing stop, karena runner sering turun 30–50% di tengah jalan. Sisa yang ditahan tidak dihitung dalam batas `PAPER_MAX_OPEN`, jadi tidak menghalangi trade baru, dan harganya dicek tiap 5 menit (`RUNNER_POLL_SEC`).
 
-Kalau kuat, 50% dijual di TP dan 50% ditahan. Sisa itu dijual saat salah satu terjadi lebih dulu:
-- harga turun 30% dari puncaknya (stop tidak pernah di bawah harga beli, tapi kalau harga melompat, fill bisa lebih rendah);
-- holder turun 15% dari jumlah tertingginya;
-- sudah 12 jam sejak TP.
+Alasannya: kalau semua dijual di 2×, runner terpotong di 2× dan tidak pernah bisa menutup kerugian token lain. Di gabungan data replay, aturan ini impas kalau 1 dari 100 token yang dibeli menjadi runner ($10 jt+), dan jelas untung kalau 1 dari 50. Seberapa sering itu terjadi diukur oleh `pipeline:runners` (di bawah).
 
-Kalau lemah, semua dijual seperti biasa. Hasil akhirnya dicatat sebagai satu transaksi (bagian yang dijual di TP ikut dihitung). Pengaturannya lewat `PAPER_RUNNER` (0 untuk mematikan), `RUNNER_MIN_HOLDER_GROWTH`, `RUNNER_MIN_VOLUME_5M`, `RUNNER_KEEP_PCT`, `RUNNER_TRAIL_PCT`, `RUNNER_HOLDER_DROP_PCT`, dan `RUNNER_MAX_HOLD_MIN`. Di replay 151 transaksi dengan volume sebagai satu-satunya cek, aturan ini memperbaiki rata-rata sekitar 1 poin dibanding menjual semua. Syarat holder belum terbukti; itulah yang diukur paper trading.
+Pengaturan: `PAPER_RUNNER` (0 = mati), `RUNNER_KEEP_PCT`, `RUNNER_STOP_X`, `RUNNER_MAX_HOLD_MIN`, `RUNNER_POLL_SEC`. Opsional (default mati): `RUNNER_MIN_HOLDER_GROWTH`, `RUNNER_MIN_VOLUME_5M`, `RUNNER_SMART_NOT_FEWER` (tahan hanya kalau token masih kuat), `RUNNER_TRAIL_PCT`, `RUNNER_HOLDER_DROP_PCT` (exit tambahan).
 
 Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_OPEN`, `PAPER_TP` (2 = +100%), `PAPER_SL` (0,7 = −30%), `PAPER_MAX_HOLD_MIN`, dan `PAPER_COST_PCT`. Paper trading juga bisa diaktifkan di profil lain dengan `PAPER=1`.
 
 `pipeline:replay` (opsi: `REPLAY_TPS=1.15,1.3,2`, `REPLAY_SLS=0.9,0.7`, `REPLAY_DIR=<folder cache lama>` untuk memakai ulang data) mengambil token berdasarkan **umur** (termasuk yang sudah mati), memutar ulang aturan di atas per menit tanpa melihat harga ke depan, lalu membandingkan berbagai kombinasi TP/SL. Satu kali jalan hanya mewakili satu sesi pasar, jadi ulangi di hari yang berbeda. Data holder, top 10, bundler, dan dev pada waktu itu tidak tersedia, sehingga aturan-aturan tersebut tidak ikut di-replay.
+
+## Pencatat peluang runner: `pipeline:runners`
+
+```bash
+npm run pipeline:runners              # jalan terus, satu putaran tiap 10 menit (TRACK_INTERVAL_SEC)
+npm run pipeline:runners -- --once    # satu putaran lalu laporan
+npm run pipeline:runners -- --report  # laporan saja, tanpa panggilan API
+```
+
+Setiap token launchpad dilihat sekali, saat umurnya 60–120 menit. Token dipilih berdasarkan umur tanpa filter mcap, jadi token yang tembus $100 rb lalu langsung dump tetap tercatat. Kalau token itu tembus mcap $100 rb dalam jam pertamanya, ia dicatat beserta hasil gerbang runner (volume 5 menit ≥ $15 rb, tembus ≥ 1 menit setelah launch, naik ≤ +200% dalam 5 menit). Yang lolos maupun gagal ikut dicatat; yang gagal menjadi kelompok pembanding. Tujuh hari kemudian (`TRACK_DAYS`) dicek puncak mcap-nya, dari close per jam yang volumenya minimal $5 rb, supaya satu print palsu tidak terhitung. Laporan menampilkan berapa yang mencapai $1 jt dan $10 jt per kelompok.
+
+Angka ini yang menentukan apakah strategi runner menghasilkan: titik impasnya sekitar 1 runner per 100 token yang lolos gerbang. Jalankan terus di VPS (`pm2 start npm --name runners -- run pipeline:runners`) dan baru percayai hasilnya setelah ratusan token terselesaikan. Data disimpan di `pipeline/data-runners/tracked.json`.
 
 ## Konfigurasi
 

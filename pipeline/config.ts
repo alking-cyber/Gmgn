@@ -158,15 +158,19 @@ export const cfg = {
     stopLoss: num("PAPER_SL", 0.7), // multiple of entry: 0.7 = -30%
     maxHoldMin: num("PAPER_MAX_HOLD_MIN", 180),
     costPct: num("PAPER_COST_PCT", 1.5), // slippage + fee, charged on entry and exit
-    // Runner hold: at the take-profit, keep part of a token that is still strong instead of selling it all
+    // Runner hold: at the take-profit sell half and keep half with no target, so a runner can pay for the losers
     runner: {
       enabled: bool("PAPER_RUNNER", pd(false, false, true)),
-      minHolderGrowth: num("RUNNER_MIN_HOLDER_GROWTH", 0.2), // holders up 20%+ since the buy
-      minVolume5m: num("RUNNER_MIN_VOLUME_5M", 30000), // USD traded in the last 5 minutes
       keepPct: num("RUNNER_KEEP_PCT", 0.5), // share kept; the rest is sold at the take-profit
-      trailPct: num("RUNNER_TRAIL_PCT", 0.3), // kept part exits 30% below its high (never below entry)
-      holderDropPct: num("RUNNER_HOLDER_DROP_PCT", 0.15), // ...or when holders fall 15% from their high
-      maxHoldMin: num("RUNNER_MAX_HOLD_MIN", 720), // ...or 12 hours after the take-profit
+      stopX: num("RUNNER_STOP_X", 0.7), // kept part exits at this multiple of the entry price (0.7 = -30%)
+      maxHoldMin: num("RUNNER_MAX_HOLD_MIN", 7 * 1440), // ...or after this long
+      pollSec: num("RUNNER_POLL_SEC", 300), // kept parts are priced every 5 minutes, not every journal tick
+      // optional, off by default (0 / false): keep only strong tokens, extra exits
+      minHolderGrowth: num("RUNNER_MIN_HOLDER_GROWTH", 0), // e.g. 0.2 = holders up 20% since the buy
+      minVolume5m: num("RUNNER_MIN_VOLUME_5M", 0), // e.g. 30000 = $30K traded in the last 5 minutes
+      smartNotFewer: bool("RUNNER_SMART_NOT_FEWER", false),
+      trailPct: num("RUNNER_TRAIL_PCT", 0), // e.g. 0.3 = also exit 30% below the high
+      holderDropPct: num("RUNNER_HOLDER_DROP_PCT", 0), // e.g. 0.15 = also exit when holders fall 15% from their high
     },
   },
 };

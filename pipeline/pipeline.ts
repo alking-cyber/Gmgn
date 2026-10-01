@@ -43,6 +43,7 @@ interface Journaled {
   alertAt: number;
   alertPrice: number;
   until: number;
+  lastPoll?: number;
 }
 
 export interface PipelineState {
@@ -258,8 +259,10 @@ export class Pipeline {
     const r = this.cfg.paper.runner;
     await this.notify(
       `🏃 Paper runner **${c.symbol}**: sold ${Math.round(c.soldFrac * 100)}% at take-profit ($${c.proceeds.toFixed(2)}), ` +
-        `keeping ${Math.round(r.keepPct * 100)}% — ${c.why}. Exits ${Math.round(r.trailPct * 100)}% below its high (not below entry), ` +
-        `when holders drop ${Math.round(r.holderDropPct * 100)}%, or after ${Math.round(r.maxHoldMin / 60)}h`
+        `keeping ${Math.round(r.keepPct * 100)}% with no target (${c.why}). It exits at ${Math.round((r.stopX - 1) * 100)}% from entry` +
+        (r.trailPct > 0 ? `, ${Math.round(r.trailPct * 100)}% below its high` : "") +
+        (r.holderDropPct > 0 ? `, when holders drop ${Math.round(r.holderDropPct * 100)}%` : "") +
+        ` or after ${Math.round(r.maxHoldMin / 1440)} days`
     ).catch((err) => this.log(`[paper] notify failed: ${(err as Error).message}`));
   }
 
@@ -276,6 +279,7 @@ export class Pipeline {
       take_profit: "take-profit",
       stop_loss: "stop-loss",
       time_stop: "time stop",
+      runner_stop: "runner stop (-30% from entry)",
       runner_trail: "runner trailing stop",
       runner_holders_leaving: "runner: holders leaving",
       runner_time: "runner time limit",
@@ -289,6 +293,9 @@ export class Pipeline {
   async journalTick(): Promise<void> {
     const t = this.clock();
     for (const [addr, j] of Object.entries(this.state.journaling)) {
+      // a kept runner half is held for days: price it every RUNNER_POLL_SEC, not every tick
+      if (this.paper?.s.positions[addr]?.runner && j.lastPoll && t - j.lastPoll < this.cfg.paper.runner.pollSec) continue;
+      j.lastPoll = t;
       if (t >= j.until) {
         this.store.event("journal_done", { address: addr, symbol: j.symbol });
         delete this.state.journaling[addr];
