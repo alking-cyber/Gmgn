@@ -1,6 +1,6 @@
 ---
 name: gmgn-degen
-description: "Memecoin degen playbook on Solana, built to find tokens that can run from ~$100K to tens of millions — ranks early tokens by a runner score learned from past 100x tokens (not a strict pass/fail filter), keeps a watchlist of why past tokens ran thousands of percent, checks one token for the exit-liquidity trap, reads hot narratives, finds copyable smart wallets, and plans trades (half at 2x, the other half held for a runner). Use when the user asks: token apa yang potensinya besar, cari koin potensial / gem / runner, koin yang bisa 100x, kenapa token X naik ribuan persen, update watchlist runner, cek token ini, token sudah 2x tahan atau jual, narasi apa yang lagi panas, cari smart wallet, cara TP/SL, berapa modal per trade."
+description: "Memecoin degen playbook on Solana, built to find tokens that can run from ~$100K to tens of millions — ranks early tokens by a runner score learned from past 100x tokens (not a strict pass/fail filter), keeps a watchlist of why past tokens ran thousands of percent, checks one token for the exit-liquidity trap, reads hot narratives, finds copyable smart wallets, and plans trades (-30% stop, 30% trailing stop from 3x) with honest out-of-sample results. Use when the user asks: token apa yang potensinya besar, cari koin potensial / gem / runner, koin yang bisa 100x, kenapa token X naik ribuan persen, update watchlist runner, cek token ini, token sudah 2x tahan atau jual, narasi apa yang lagi panas, cari smart wallet, cara TP/SL, berapa modal per trade."
 argument-hint: "[scan|runners|check <address_or_name>|hold <address> <entry_mcap>|narrative|wallets|plan] [--chain sol]"
 metadata:
   cliHelp: "gmgn-cli market trenches --help && gmgn-cli market trending --help && gmgn-cli token holders --help && gmgn-cli market kline --help && gmgn-cli market hot-searches --help && gmgn-cli portfolio stats --help"
@@ -224,7 +224,7 @@ SMART MONEY: <n> holding now ($<total>), entries $<a>–$<b>; <n> already exited
 HOLDER BASE: <strong|mixed|fragile> — top-20 median entry $<x> vs now $<y>; biggest wallet <p>%; vault <v>%
 LIQUIDITY: $<liq> (<pct>% of mcap) · FLOW 1h: buys <b> / sells <s> · ATH $<ath> (<-%>)
 BIGGEST RISK: <one line>
-PLAN: <from `plan`, with mcap levels: SL $<0.7×>, sell 50% at $<2×>, hold the rest to $<0.7×>>
+PLAN: <from `plan`, with mcap levels: SL $<0.7×>, trailing 30% from the high once $<3×>>
 WHO IS MY EXIT LIQUIDITY? <who bought below you and will sell into you; who is left to buy after you>
 ```
 
@@ -252,37 +252,28 @@ A missing field is "not visible", never zero.
 
 ## Mode `plan` — sizing and exits
 
-Tested on 208 age-based replay trades (four sessions, dead tokens included, entry when market cap first crossed $100K, 1.5% cost per side):
-
 | Rule | Value | Why |
 |---|---|---|
-| Size | **3–5% of equity per token** | Most picks die; small size is what lets you keep taking shots |
+| Size | **3–5% of equity per token**, and only if each position is at least ~$20 | Most picks die. Below ~$20 the fixed Solana network cost (priority fee + tip, about $0.10 per transaction) eats 1%+ of every buy and sale |
 | Max open | 10 positions | Spread across narratives, not ten clones of one theme |
-| Stop | **−30% from entry** | Needed: holding without a stop averaged about −89% per token |
-| Take-profit | **sell 50% at 2× (+100%)** — the stake is back | A full exit at 2× caps every runner at 2×, so runners can never pay for the losers |
-| Runner half | **keep the other 50% with no target; exit only if price falls to −30% from the entry** (review after 7 days) | No trailing stop: runners dip 30–50% on the way up, and 30–50% trails cut them at 2–7× |
+| Stop | **−30% from entry** until the trailing stop takes over | Wider stops lost more at every setting tested (−50%: −24%, no stop: −48% per trade with the old exit). Of tokens that touched −30% in their first 2 minutes, only 3 of 61 were above entry a week later |
+| Exit | **no fixed target; once price reaches 3×, sell everything 30% below the highest price since the buy** | The steadiest of 309 exits compared on 118 out-of-sample trades and 34 earlier ones: −0.5% and −2.2% per trade. Fixed 2× targets cap runners; "hold the rest to −30%" gave back a 34× run when the token was rugged within the hour |
 | Never | add to a position because market cap crossed $300K / $1M / $3M | Lost in the age-based test (42 of 45 tokens that crossed $300K died; every rule at $1M lost) |
-| Never | sell everything at 2× when hunting runners, or trail the runner half tightly | See the blend table below |
-| Never | fixed +15–30% take-profit on everything | Wins too small after ~3% round-trip cost |
 
-Set it at the buy with `gmgn-swap` condition orders, so the take-profit and stop live from the first second (most of the gains — and most of the losses — came in the first minutes):
+Set it at the buy with `gmgn-swap` condition orders, so the stop and the trailing exit live from the first second:
 
 ```bash
---condition-orders '[{"order_type":"profit_stop","side":"sell","price_scale":"100","sell_ratio":"50"},{"order_type":"loss_stop","side":"sell","price_scale":"30","sell_ratio":"100"}]'
+--condition-orders '[{"order_type":"profit_stop_trace","side":"sell","price_scale":"200","sell_ratio":"100","drawdown_rate":"30"},{"order_type":"loss_stop","side":"sell","price_scale":"30","sell_ratio":"100"}]'
 ```
 
-This sells half at 2× automatically, and the −30% stop stays on the rest (`sell_ratio` 100 of what is left). Nothing else to do unless the user wants the optional `hold` check.
+(`profit_stop_trace` with `price_scale` 200 arms at +200% = 3×, `drawdown_rate` 30 sells 30% below the peak.)
 
-Why this plan — the whole strategy rests on the runner rate. Blend of the 43 gated ordinary tokens (age-based, dead ones included) with the 11 gated $10M+ runners; profit per 100 trades of $10, by how often a pick becomes a runner:
+**Honesty block — state it every time the plan is given, with these numbers.** On 118 tokens that passed the runner gate and funding checks and were not used to design anything (launched 20–110 hours before 2026-10-01, dead ones included):
+- best exit averaged about −0.5% per trade before network fees, but 86% of trades lost and the average rested on one token (6× from a 34× run);
+- a $50 account at 10% per trade ended at about $9 (−81%) with $0.10 network fees, about $20 (−60%) without them; $500 and $2,000 accounts also lost about 60%. A near-zero average with mostly losing trades still shrinks a compounding account;
+- every other exit tested lost more. The losses come from the picks, not the exit: half of all picks hit −30% within two minutes.
 
-| Exit | ordinary token: $1 → | runner: $1 → | 1 runner in 50 | in 100 | in 200 | in 300 |
-|---|---|---|---|---|---|---|
-| **half at 2×, hold the rest to −30%** | $0.77 | $24 | **+$237** | **+$5** | −$110 | −$149 |
-| everything at 2× | $0.97 | $1.4 | −$24 | −$28 | −$30 | −$31 |
-| no stop at all | $0.16 | $58 | +$327 | −$255 | −$546 | −$643 |
-| −30% stop, 50% trail after 3× | $0.82 | $2.5 | −$143 | −$160 | −$168 | −$171 |
-
-Estimated runner rate after the runner gate: about 1 in 100 (1 in 300 without it, × ~3 from the gate) — right at break-even, and not yet measured live. State this every time the plan is given. Rugs inside one minute remain the biggest loss source (a −30% stop fills near −65% on them). The number that decides profit or loss is measured by `npm run pipeline:runners` in this repo (records every token that crosses $100K, gate pass or fail, and checks 7 days later whether it reached $10M). Paper-trade the plan with `npm run pipeline:loose`.
+So: no tested version of this strategy has made money out of sample. Do not size it with money the user needs. Paper-trade it (`npm run pipeline:loose` in this repo runs exactly this plan) and track the runner rate (`npm run pipeline:runners`) before any real trade.
 
 ---
 
@@ -318,7 +309,7 @@ Evidence, to state when asked: with 5-minute volume as the only check this impro
 Narrative: <leader of "<theme>" with <k> clones | original | copy of <leader>> · hot-search: <yes/no>
 Gate: pass (vol $<v>K, <n>% green into the cross) · Funding: <ok | n wallets funded together / one funder> · Biggest wallet <p>% · Bundle <b>% (risk note) · Fresh <f> · Smart/KOL <n>
 For: <strongest reason> · Risk: <biggest risk>
-Plan: size 3–5% · SL $<0.7×mcap> · sell 50% at $<2×mcap> · hold the rest, exit only at $<0.7×mcap>
+Plan: size 3–5% (≥ $20) · SL $<0.7×mcap> · no target; trailing 30% from the high once $<3×mcap>
 ```
 
 End every `scan` answer with: these are ranked bets, not predictions — most will die; the edge, if any, comes from small size across many shots and letting the rare runner run.

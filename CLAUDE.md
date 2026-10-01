@@ -38,7 +38,7 @@ This is a **Claude Code plugin** — a collection of GMGN OpenAPI skills for on-
 | `gmgn-holder-analysis` | Chip / holder structure of one token | User asks about holder distribution or chip concentration. |
 | `gmgn-wallet-analysis` | Wallet decision dossier | User asks whether a wallet is worth copy-trading. |
 | `gmgn-cooking` | Launchpad token creation | User wants to create or launch a token. |
-| `gmgn-degen` | Memecoin degen playbook: scan new tokens for upside, exit-liquidity check on one token, hot narratives, copyable smart wallets, trade plan (size/stop, half at 2×, runner half held) — thresholds measured on live data | User asks which tokens have big potential right now ("token apa yang potensinya besar", "cari gem", "next runner"), wants a token checked for the exit-liquidity trap ("cek token ini", "am I exit liquidity"), asks what narrative is hot ("narasi apa yang lagi panas"), wants smart wallets worth following ("cari smart wallet"), or asks how to size / TP / SL memecoin trades |
+| `gmgn-degen` | Memecoin degen playbook: scan new tokens for upside, exit-liquidity check on one token, hot narratives, copyable smart wallets, trade plan (size/stop, trailing exit from 3×) with out-of-sample results — thresholds measured on live data | User asks which tokens have big potential right now ("token apa yang potensinya besar", "cari gem", "next runner"), wants a token checked for the exit-liquidity trap ("cek token ini", "am I exit liquidity"), asks what narrative is hot ("narasi apa yang lagi panas"), wants smart wallets worth following ("cari smart wallet"), or asks how to size / TP / SL memecoin trades |
 
 ## Quick Decision Guide
 

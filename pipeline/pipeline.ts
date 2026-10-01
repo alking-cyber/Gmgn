@@ -267,8 +267,11 @@ export class Pipeline {
       this.store.event("paper_open", { address: addr, symbol: tr.symbol, price: pos.entryPrice, size: pos.size, cash: this.paper!.s.cash });
       const c = this.cfg.paper;
       text +=
-        `\n📝 Paper buy $${pos.size.toFixed(2)} · TP ${usd(info.marketCap * c.takeProfit)} mcap (+${Math.round((c.takeProfit - 1) * 100)}%)` +
-        ` · SL ${usd(info.marketCap * c.stopLoss)} (-${Math.round((1 - c.stopLoss) * 100)}%) · max ${c.maxHoldMin}m`;
+        `\n📝 Paper buy $${pos.size.toFixed(2)}` +
+        (c.takeProfit > 0 ? ` · TP ${usd(info.marketCap * c.takeProfit)} mcap (+${Math.round((c.takeProfit - 1) * 100)}%)` : "") +
+        ` · SL ${usd(info.marketCap * c.stopLoss)} (-${Math.round((1 - c.stopLoss) * 100)}%)` +
+        (c.trailArm > 0 ? ` · trailing ${Math.round(c.trailPct * 100)}% from the high once ${usd(info.marketCap * c.trailArm)} (${c.trailArm}x)` : "") +
+        ` · max ${c.maxHoldMin >= 1440 ? `${Math.round(c.maxHoldMin / 1440)}d` : `${c.maxHoldMin}m`}`;
     }
     await this.notify(text).catch((err) => this.log(`[alert] notify failed: ${(err as Error).message}`));
   }
@@ -300,6 +303,7 @@ export class Pipeline {
     const why = {
       take_profit: "take-profit",
       stop_loss: "stop-loss",
+      trailing_stop: "trailing stop",
       time_stop: "time stop",
       runner_stop: "runner stop (-30% from entry)",
       runner_trail: "runner trailing stop",

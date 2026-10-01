@@ -152,23 +152,28 @@ export const cfg = {
   },
 
   // ---- Stage 4: journal ----
-  journalHours: num("JOURNAL_HOURS", pd(6, 6, 3)),
+  journalHours: num("JOURNAL_HOURS", pd(6, 6, 7 * 24 + 1)), // loose journals held tokens only, until they close
   // false: only journal alerts that hold a paper position (loose alerts far too often to poll them all)
   journalAllAlerts: bool("JOURNAL_ALL_ALERTS", pd(true, true, false)),
 
   // ---- Paper trading: simulated positions on every alert, no real orders ----
   paper: {
     enabled: bool("PAPER", pd(false, false, true)),
-    startCapital: num("PAPER_CAPITAL", 140),
+    startCapital: num("PAPER_CAPITAL", pd(140, 140, 50)),
     positionPct: num("PAPER_POSITION_PCT", 0.1), // share of equity per trade
     maxOpen: num("PAPER_MAX_OPEN", 8), // alerts arriving while this many are open are skipped
-    takeProfit: num("PAPER_TP", 2.0), // multiple of entry: 2.0 = +100%
+    // loose: no fixed target; a 30% trailing stop arms once price reaches 3x (the steadiest of 309
+    // exits compared on 118 out-of-sample trades and 34 earlier ones), -30% stop before that
+    takeProfit: num("PAPER_TP", pd(2.0, 2.0, 0)), // multiple of entry: 2.0 = +100%; 0 = no fixed target
     stopLoss: num("PAPER_SL", 0.7), // multiple of entry: 0.7 = -30%
-    maxHoldMin: num("PAPER_MAX_HOLD_MIN", 180),
+    trailArm: num("PAPER_TRAIL_ARM", pd(0, 0, 3)), // trailing stop arms at this multiple of entry; 0 = off
+    trailPct: num("PAPER_TRAIL_PCT", 0.3), // ...and sells 30% below the highest polled price
+    maxHoldMin: num("PAPER_MAX_HOLD_MIN", pd(180, 180, 7 * 1440)),
     costPct: num("PAPER_COST_PCT", 1.5), // slippage + fee, charged on entry and exit
+    feeUsd: num("PAPER_FEE_USD", pd(0, 0, 0.1)), // fixed SOL network cost (priority fee + tip) per transaction
     // Runner hold: at the take-profit sell half and keep half with no target, so a runner can pay for the losers
     runner: {
-      enabled: bool("PAPER_RUNNER", pd(false, false, true)),
+      enabled: bool("PAPER_RUNNER", false), // replaced in loose by the trailing stop: holding half lost every gain on rugs
       keepPct: num("RUNNER_KEEP_PCT", 0.5), // share kept; the rest is sold at the take-profit
       stopX: num("RUNNER_STOP_X", 0.7), // kept part exits at this multiple of the entry price (0.7 = -30%)
       maxHoldMin: num("RUNNER_MAX_HOLD_MIN", 7 * 1440), // ...or after this long

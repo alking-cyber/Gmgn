@@ -9,7 +9,11 @@
  *   - stop-loss: sells everything at the first polled price at or below entry × stopLoss
  *     (fills at that observed price, which can be well below the stop when price gaps)
  *   - time stop: sells at the polled price after maxHoldMin
- *   - costPct is charged on entry and on exit (slippage + fees)
+ *   - trailing stop (trailArm > 0): once the polled price has reached entry × trailArm, sells at the
+ *     first poll trailPct or more below the highest polled price (fills at the observed price)
+ *   - takeProfit 0 = no fixed target
+ *   - costPct is charged on entry and on exit (slippage + fees); feeUsd is a fixed network cost per
+ *     transaction (buy and each sale), which matters a lot for small accounts
  *
  * Runner hold (config.paper.runner, when enabled): at the take-profit, sell (1 - keepPct) and keep
  * the rest so a runner can pay for the losers. Default: sell half at 2x (the stake comes back) and
@@ -40,6 +44,7 @@ export interface PaperPosition {
   size: number; // USD committed, before costs
   openedAt: number;
   entry?: Strength; // token state at the buy, for the runner check
+  peak?: number; // highest polled price as a multiple of entry, for the trailing stop
   runner?: {
     keptFrac: number; // share of the position still held
     realized: number; // USD already received from the part sold at the take-profit
@@ -69,7 +74,7 @@ export const emptyPaper = (capital: number): PaperState => ({
   skipped: 0,
 });
 
-export type ExitReason = "take_profit" | "stop_loss" | "time_stop" | "runner_stop" | "runner_trail" | "runner_holders_leaving" | "runner_time";
+export type ExitReason = "take_profit" | "stop_loss" | "trailing_stop" | "time_stop" | "runner_stop" | "runner_trail" | "runner_holders_leaving" | "runner_time";
 
 /** Part of a position sold at the take-profit while the rest is kept as a runner. */
 export interface PaperPartial {
@@ -108,9 +113,9 @@ export class Paper {
       this.s.skipped = (this.s.skipped ?? 0) + 1;
       return undefined;
     }
-    const size = Math.min(this.s.cash, this.equity() * this.c.positionPct);
+    const size = Math.min(this.s.cash - this.c.feeUsd, this.equity() * this.c.positionPct);
     if (size < 0.01) return undefined;
-    this.s.cash -= size;
+    this.s.cash -= size + this.c.feeUsd;
     const p: PaperPosition = { symbol, entryPrice: price, size, openedAt: t, entry };
     this.s.positions[address] = p;
     return p;
@@ -128,13 +133,19 @@ export class Paper {
     if (p.runner) return this.markRunner(address, p, x, t, now);
     let reason: ExitReason | undefined;
     let exitX = x;
-    if (x >= this.c.takeProfit) {
+    // the trailing stop uses the highest price seen before this poll
+    const peak = p.peak ?? 1;
+    const trailing = this.c.trailArm > 0 && peak >= this.c.trailArm;
+    const stop = trailing ? Math.max(this.c.stopLoss, peak * (1 - this.c.trailPct)) : this.c.stopLoss;
+    p.peak = Math.max(peak, x);
+    if (this.c.takeProfit > 0 && x >= this.c.takeProfit) {
       const why = this.strong(p, now);
       if (why) return this.keepRunner(address, p, t, x, now, why);
       reason = "take_profit";
       exitX = this.c.takeProfit; // limit order fills at its level, never better
-    } else if (x <= this.c.stopLoss) {
-      reason = "stop_loss"; // fills at the observed price: gaps through the stop are real losses
+    } else if (x <= stop) {
+      // fills at the observed price: gaps through the stop are real losses
+      reason = trailing && stop > this.c.stopLoss ? "trailing_stop" : "stop_loss";
     } else if (t - p.openedAt >= this.c.maxHoldMin * 60) {
       reason = "time_stop";
     }
@@ -158,7 +169,7 @@ export class Paper {
 
   private keepRunner(address: string, p: PaperPosition, t: number, x: number, now: Strength | undefined, why: string): PaperPartial {
     const soldFrac = 1 - this.c.runner.keepPct;
-    const proceeds = p.size * soldFrac * ((this.c.takeProfit * (1 - this.cost)) / (1 + this.cost));
+    const proceeds = p.size * soldFrac * ((this.c.takeProfit * (1 - this.cost)) / (1 + this.cost)) - this.c.feeUsd;
     this.s.cash += proceeds;
     p.runner = { keptFrac: this.c.runner.keepPct, realized: proceeds, since: t, peakPrice: p.entryPrice * x, peakHolders: now?.holders ?? 0 };
     return { address, symbol: p.symbol, price: p.entryPrice * this.c.takeProfit, soldFrac, proceeds, why };
@@ -182,9 +193,9 @@ export class Paper {
   private close(address: string, reason: ExitReason, exitPrice: number, t: number): PaperClose {
     const p = this.s.positions[address];
     const kept = p.runner?.keptFrac ?? 1;
-    const last = p.size * kept * (((exitPrice / p.entryPrice) * (1 - this.cost)) / (1 + this.cost));
+    const last = p.size * kept * (((exitPrice / p.entryPrice) * (1 - this.cost)) / (1 + this.cost)) - this.c.feeUsd;
     const proceeds = (p.runner?.realized ?? 0) + last;
-    const ret = proceeds / p.size - 1;
+    const ret = (proceeds - this.c.feeUsd) / p.size - 1; // the buy's network fee counts too
     delete this.s.positions[address];
     this.s.cash += last;
     this.s.trades++;

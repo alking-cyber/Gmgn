@@ -16,9 +16,13 @@ assert.equal(cfg.s3.minHoldingSmart, 0);
 assert.equal(cfg.s3.minKolPlusSmart, 0);
 console.log("  ✓ loose profile: entry at the $100K cross through the runner gate + funding checks, no smart-money requirement, paper trading on");
 
-assert.equal(cfg.paper.runner.enabled, true, "loose keeps half of every take-profit by default");
+assert.equal(cfg.paper.runner.enabled, false, "loose uses the trailing stop, not the runner hold");
+assert.equal(cfg.paper.takeProfit, 0);
+assert.equal(cfg.paper.trailArm, 3);
+assert.equal(cfg.paper.trailPct, 0.3);
+assert.equal(cfg.paper.startCapital, 50);
 // cases 1-5: plain book (runner hold off)
-const c = { ...cfg.paper, startCapital: 140, positionPct: 0.1, maxOpen: 8, takeProfit: 2, stopLoss: 0.7, maxHoldMin: 180, costPct: 1.5, runner: { ...cfg.paper.runner, enabled: false } };
+const c = { ...cfg.paper, startCapital: 140, positionPct: 0.1, maxOpen: 8, takeProfit: 2, stopLoss: 0.7, maxHoldMin: 180, costPct: 1.5, feeUsd: 0, trailArm: 0, runner: { ...cfg.paper.runner, enabled: false } };
 const k = (1 - 0.015) / (1 + 0.015); // round-trip cost factor
 const close = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 const p = new Paper(c, emptyPaper(140));
@@ -106,4 +110,21 @@ ex.open("H", "H", 1, T, entry);
 ex.mark("H", 2, T + 60, { holders: 2000, volume5m: 0, smartPlusKol: 0 });
 assert.equal((ex.mark("H", 2.1, T + 120, { holders: 1690, volume5m: 0, smartPlusKol: 0 }) as PaperClose).reason, "runner_holders_leaving");
 console.log("  ✓ runner hold: half at 2x, half held to -30% from entry with no trailing, kept halves free their slot; optional checks/exits work");
+
+// 10. loose default: no fixed target, -30% stop, 30% trailing stop once 3x, $0.10 network fee per transaction
+const tc = { ...c, takeProfit: 0, trailArm: 3, trailPct: 0.3, feeUsd: 0.1, maxHoldMin: 7 * 1440 };
+const tp2 = new Paper(tc, emptyPaper(50));
+tp2.open("A", "A", 1, T);
+assert.ok(close(tp2.s.cash, 50 - 5 - 0.1), "10% of $50 plus the buy fee");
+assert.equal(tp2.mark("A", 2.5, T + 60), undefined, "no fixed target at 2x");
+assert.equal(tp2.mark("A", 1.9, T + 120), undefined, "below 3x the trail is not armed: a dip from 2.5x to 1.9x is held");
+assert.equal(tp2.mark("A", 10, T + 180), undefined, "rides to 10x");
+assert.equal(tp2.mark("A", 7.5, T + 240), undefined, "25% off the high: still held");
+const ts2 = tp2.mark("A", 6.9, T + 300) as PaperClose;
+assert.equal(ts2.reason, "trailing_stop", "31% below the 10x high");
+assert.ok(close(ts2.proceeds, 5 * 6.9 * k - 0.1), "sale fee deducted");
+assert.ok(close(ts2.ret, (ts2.proceeds - 0.1) / 5 - 1), "return counts the buy fee too");
+tp2.open("B", "B", 1, T);
+assert.equal((tp2.mark("B", 0.69, T + 60) as PaperClose).reason, "stop_loss", "before 3x the -30% stop applies");
+console.log("  ✓ trailing exit: no target, -30% stop, 30% trail armed at 3x, fixed network fee per transaction");
 console.log("all paper checks passed");

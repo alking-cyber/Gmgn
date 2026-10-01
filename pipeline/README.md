@@ -73,16 +73,14 @@ Profil ini menjalankan strategi yang sudah diuji di replay. Profil ini **tidak m
 | Discovery | token launchpad (termasuk stonkfun) umur 2–60 menit yang sudah tembus mcap $100 rb (band $100 rb–$1 jt), minimal 50 holder dan likuiditas $5 rb, dev ≤ 30%, top 10 ≤ 70% |
 | Gerbang | titik tembus $100 rb harus lolos gerbang runner (`gate.ts`): volume 5 menit ≥ $15 rb, tembus ≥ 1 menit setelah launch, naik ≤ +200% dalam 5 menit, dan bukan bot ramp (≤ 80% candle hijau). Lalu cek funding: tidak boleh ada ≥ 5 wallet trader yang di-funding dalam 10 menit yang sama atau dari satu alamat yang sama sebelum titik tembus. Token yang mcap-nya sudah lebih dari 2× titik tembus dilewati. Bundle dan fresh wallet **tidak** dipakai sebagai alasan menolak, karena runner justru banyak bundle-nya |
 | Tracking | minimal 3 scan / 40 detik; gagal hanya kalau likuiditas turun lebih dari 25% |
-| Paper trading | modal $140, **10% ekuitas per transaksi**, maksimal **8 posisi** terbuka (alert berikutnya dilewati dan dihitung), **TP +100%** (jual semua), **SL −30%**, tutup paksa setelah **180 menit**, biaya 1,5% per sisi |
+| Paper trading | modal **$50**, **10% ekuitas per transaksi**, maksimal **8 posisi**. Tanpa target tetap: **stop −30%**, dan setelah harga sempat **3×**, semua dijual saat turun **30% dari puncak**. Maksimal 7 hari. Biaya 1,5% per sisi + **$0,10 per transaksi** (biaya jaringan Solana) |
 | Jurnal | hanya token yang sedang dipegang, tiap 30 detik; berhenti saat posisi ditutup |
 
 Cara transaksi simulasi diisi: TP terisi tepat di levelnya (limit order); SL terisi di harga pertama yang terlihat di bawah level (kalau harga melompat, rugi lebih besar dari −30%); harga dicek tiap 30 detik.
 
-**Tahan runner (default aktif di profil ini).** Saat TP +100% tersentuh, 50% posisi dijual (modal kembali), dan 50% sisanya ditahan **tanpa target**. Sisa itu hanya dijual kalau harga turun ke −30% dari harga beli, atau setelah 7 hari. Tidak ada trailing stop, karena runner sering turun 30–50% di tengah jalan. Sisa yang ditahan tidak dihitung dalam batas `PAPER_MAX_OPEN`, jadi tidak menghalangi trade baru, dan harganya dicek tiap 5 menit (`RUNNER_POLL_SEC`).
+**Kenapa trailing 3×, bukan "jual 50% di 2×, tahan sisanya".** Dari 309 aturan exit yang diuji pada 118 token yang tidak dipakai untuk merancang aturan (plus 34 token sesi lama), aturan ini paling stabil: −0,5% dan −2,2% per trade. Aturan "tahan sisanya ke −30%" kehilangan seluruh kenaikan 34× GTA 6 Coin ketika token itu di-rug dalam satu jam. **Tapi tidak ada versi yang terbukti untung.** Modal $50 dengan 10% per trade berakhir sekitar $9 (−81%), dan tetap −60% tanpa biaya jaringan, karena 86% trade kalah. Paper trading ini untuk mengukur, bukan bukti untung.
 
-Alasannya: kalau semua dijual di 2×, runner terpotong di 2× dan tidak pernah bisa menutup kerugian token lain. Di gabungan data replay, aturan ini impas kalau 1 dari 100 token yang dibeli menjadi runner ($10 jt+), dan jelas untung kalau 1 dari 50. Seberapa sering itu terjadi diukur oleh `pipeline:runners` (di bawah).
-
-Pengaturan: `PAPER_RUNNER` (0 = mati), `RUNNER_KEEP_PCT`, `RUNNER_STOP_X`, `RUNNER_MAX_HOLD_MIN`, `RUNNER_POLL_SEC`. Opsional (default mati): `RUNNER_MIN_HOLDER_GROWTH`, `RUNNER_MIN_VOLUME_5M`, `RUNNER_SMART_NOT_FEWER` (tahan hanya kalau token masih kuat), `RUNNER_TRAIL_PCT`, `RUNNER_HOLDER_DROP_PCT` (exit tambahan).
+Pengaturan exit: `PAPER_TP` (0 = tanpa target), `PAPER_SL`, `PAPER_TRAIL_ARM`, `PAPER_TRAIL_PCT`, `PAPER_FEE_USD`. Mode "tahan runner" yang lama masih bisa diaktifkan dengan `PAPER_RUNNER=1` (`RUNNER_*`).
 
 Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_OPEN`, `PAPER_TP` (2 = +100%), `PAPER_SL` (0,7 = −30%), `PAPER_MAX_HOLD_MIN`, dan `PAPER_COST_PCT`. Paper trading juga bisa diaktifkan di profil lain dengan `PAPER=1`.
 
