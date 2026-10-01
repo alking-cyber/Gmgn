@@ -77,6 +77,18 @@ Profil ini **tidak mengirim order sungguhan.** Setiap alert membuka posisi simul
 
 Cara transaksi simulasi diisi: TP terisi tepat di levelnya (limit order); SL terisi di harga pertama yang terlihat di bawah level (kalau harga melompat, rugi lebih besar dari −30%); harga dicek tiap 30 detik.
 
+**Tahan runner (default aktif di profil ini).** Saat TP +100% tersentuh, pipeline mengecek token dengan data `token info` terbaru. Token dianggap masih kuat kalau semua syarat ini terpenuhi:
+- holder naik minimal 20% sejak beli;
+- volume 5 menit minimal $30 rb;
+- jumlah wallet smart money + KOL tidak berkurang.
+
+Kalau kuat, 50% dijual di TP dan 50% ditahan. Sisa itu dijual saat salah satu terjadi lebih dulu:
+- harga turun 30% dari puncaknya (stop tidak pernah di bawah harga beli, tapi kalau harga melompat, fill bisa lebih rendah);
+- holder turun 15% dari jumlah tertingginya;
+- sudah 12 jam sejak TP.
+
+Kalau lemah, semua dijual seperti biasa. Hasil akhirnya dicatat sebagai satu transaksi (bagian yang dijual di TP ikut dihitung). Pengaturannya lewat `PAPER_RUNNER` (0 untuk mematikan), `RUNNER_MIN_HOLDER_GROWTH`, `RUNNER_MIN_VOLUME_5M`, `RUNNER_KEEP_PCT`, `RUNNER_TRAIL_PCT`, `RUNNER_HOLDER_DROP_PCT`, dan `RUNNER_MAX_HOLD_MIN`. Di replay 151 transaksi dengan volume sebagai satu-satunya cek, aturan ini memperbaiki rata-rata sekitar 1 poin dibanding menjual semua. Syarat holder belum terbukti; itulah yang diukur paper trading.
+
 Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_OPEN`, `PAPER_TP` (2 = +100%), `PAPER_SL` (0,7 = −30%), `PAPER_MAX_HOLD_MIN`, dan `PAPER_COST_PCT`. Paper trading juga bisa diaktifkan di profil lain dengan `PAPER=1`.
 
 `pipeline:replay` (opsi: `REPLAY_TPS=1.15,1.3,2`, `REPLAY_SLS=0.9,0.7`, `REPLAY_DIR=<folder cache lama>` untuk memakai ulang data) mengambil token berdasarkan **umur** (termasuk yang sudah mati), memutar ulang aturan di atas per menit tanpa melihat harga ke depan, lalu membandingkan berbagai kombinasi TP/SL. Satu kali jalan hanya mewakili satu sesi pasar, jadi ulangi di hari yang berbeda. Data holder, top 10, bundler, dan dev pada waktu itu tidak tersedia, sehingga aturan-aturan tersebut tidak ikut di-replay.

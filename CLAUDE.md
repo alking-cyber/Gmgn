@@ -38,7 +38,7 @@ This is a **Claude Code plugin** — a collection of GMGN OpenAPI skills for on-
 | `gmgn-holder-analysis` | Chip / holder structure of one token | User asks about holder distribution or chip concentration. |
 | `gmgn-wallet-analysis` | Wallet decision dossier | User asks whether a wallet is worth copy-trading. |
 | `gmgn-cooking` | Launchpad token creation | User wants to create or launch a token. |
-| `gmgn-degen` | Memecoin degen playbook: scan new tokens for upside, exit-liquidity check on one token, hot narratives, copyable smart wallets, trade plan (size/stop/take-profit) — thresholds measured on live data | User asks which tokens have big potential right now ("token apa yang potensinya besar", "cari gem", "next runner"), wants a token checked for the exit-liquidity trap ("cek token ini", "am I exit liquidity"), asks what narrative is hot ("narasi apa yang lagi panas"), wants smart wallets worth following ("cari smart wallet"), or asks how to size / TP / SL memecoin trades |
+| `gmgn-degen` | Memecoin degen playbook: scan new tokens for upside, exit-liquidity check on one token, hot narratives, copyable smart wallets, trade plan (size/stop/take-profit, runner hold at 2×) — thresholds measured on live data | User asks which tokens have big potential right now ("token apa yang potensinya besar", "cari gem", "next runner"), wants a token checked for the exit-liquidity trap ("cek token ini", "am I exit liquidity"), asks what narrative is hot ("narasi apa yang lagi panas"), wants smart wallets worth following ("cari smart wallet"), or asks how to size / TP / SL memecoin trades |
 
 ## Quick Decision Guide
 
@@ -53,6 +53,7 @@ Match the user's request to the right skill and workflow:
 | "deep report", "full analysis", "全面分析这个项目", "深度报告", "值不值得重仓" | `gmgn-token` + `gmgn-market` → `docs/workflow-project-deep-report.md` |
 | "token apa yang potensinya besar", "cari gem / koin potensial", "find the next runner", "high-potential new tokens" | `gmgn-degen` (scan mode) — screens new launches and returns FOLLOW / WATCH / SKIP cards with a trade plan |
 | "cek token ini", "am I the exit liquidity", "masih layak masuk?" for one token | `gmgn-degen` (check mode) |
+| "token X sudah 2x, tahan atau jual?", "masih kuat nggak?", position hit its take-profit | `gmgn-degen` (hold mode) — keep 50% only if holders, volume and smart money are still strong |
 | "narasi apa yang lagi panas", "what narrative is hot", "meta hari ini" | `gmgn-degen` (narrative mode) |
 | "cari smart wallet", "wallet yang layak diikuti", "find smart wallets to follow" | `gmgn-degen` (wallets mode); score one wallet with `gmgn-wallet-score` |
 | "berapa modal per trade", "TP SL terbaik", "how should I size / take profit" | `gmgn-degen` (plan mode) |

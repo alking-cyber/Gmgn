@@ -21,7 +21,7 @@ import {
 } from "./filters.js";
 import type { GmgnSource, RankRow, TokenInfo } from "./gmgn.js";
 import type { Store } from "./store.js";
-import { Paper, emptyPaper, type PaperClose, type PaperState } from "./paper.js";
+import { Paper, emptyPaper, type PaperClose, type PaperPartial, type PaperState, type Strength } from "./paper.js";
 
 type Stage = "s1_rejected" | "tracking" | "s2_failed" | "s3_failed" | "alerted";
 
@@ -229,7 +229,7 @@ export class Pipeline {
     counters.alerts++;
     this.store.event("alert", { address: addr, symbol: tr.symbol, row: tr.lastRow, info, summary, holders: hs });
     let text = formatAlert(this.cfg.chain, addr, tr.lastRow, info, summary, hs);
-    const pos = this.paper?.open(addr, tr.symbol, info.price, t);
+    const pos = this.paper?.open(addr, tr.symbol, info.price, t, strength(info));
     if (this.cfg.journalAllAlerts || pos) {
       this.state.journaling[addr] = {
         symbol: tr.symbol,
@@ -249,6 +249,19 @@ export class Pipeline {
     await this.notify(text).catch((err) => this.log(`[alert] notify failed: ${(err as Error).message}`));
   }
 
+  private async onPaperPartial(c: PaperPartial, t: number): Promise<void> {
+    this.store.event("paper_partial", { ...c });
+    // keep polling the kept part for as long as the runner may be held
+    const j = this.state.journaling[c.address];
+    if (j) j.until = Math.max(j.until, t + this.cfg.paper.runner.maxHoldMin * 60 + 60);
+    const r = this.cfg.paper.runner;
+    await this.notify(
+      `🏃 Paper runner **${c.symbol}**: sold ${Math.round(c.soldFrac * 100)}% at take-profit ($${c.proceeds.toFixed(2)}), ` +
+        `keeping ${Math.round(r.keepPct * 100)}% — ${c.why}. Exits ${Math.round(r.trailPct * 100)}% below its high (not below entry), ` +
+        `when holders drop ${Math.round(r.holderDropPct * 100)}%, or after ${Math.round(r.maxHoldMin / 60)}h`
+    ).catch((err) => this.log(`[paper] notify failed: ${(err as Error).message}`));
+  }
+
   private async onPaperClose(c: PaperClose): Promise<void> {
     this.paper!.trackDrawdown();
     this.store.event("paper_close", { ...c });
@@ -258,7 +271,14 @@ export class Pipeline {
       this.store.event("journal_done", { address: c.address, symbol: c.symbol });
     }
     const icon = c.ret > 0 ? "✅" : "❌";
-    const why = { take_profit: "take-profit", stop_loss: "stop-loss", time_stop: "time stop" }[c.reason];
+    const why = {
+      take_profit: "take-profit",
+      stop_loss: "stop-loss",
+      time_stop: "time stop",
+      runner_trail: "runner trailing stop",
+      runner_holders_leaving: "runner: holders leaving",
+      runner_time: "runner time limit",
+    }[c.reason];
     await this.notify(
       `${icon} Paper sell **${c.symbol}** (${why}) after ${Math.round(c.heldMin)}m: ${c.ret >= 0 ? "+" : ""}${(c.ret * 100).toFixed(0)}% ` +
         `($${c.size.toFixed(2)} → $${c.proceeds.toFixed(2)})\n${this.paper!.summary()}`
@@ -276,8 +296,9 @@ export class Pipeline {
       try {
         const info = await this.src.tokenInfo(this.cfg.chain, addr);
         this.store.journal(addr, snapshot(t, info));
-        const closed = this.paper?.mark(addr, info.price, t);
-        if (closed) await this.onPaperClose(closed);
+        const res = this.paper?.mark(addr, info.price, t, strength(info));
+        if (res && "soldFrac" in res) await this.onPaperPartial(res, t);
+        else if (res) await this.onPaperClose(res);
       } catch (err) {
         this.log(`[journal] ${j.symbol} ${addr} failed: ${(err as Error).message}`);
       }
@@ -298,6 +319,11 @@ export class Pipeline {
       (this.paper ? ` | ${this.paper.summary()}` : "")
     );
   }
+}
+
+/** The token state the paper runner check uses. */
+export function strength(i: TokenInfo): Strength {
+  return { holders: i.holders, volume5m: i.volume5m, smartPlusKol: i.smartWallets + i.kolWallets };
 }
 
 export function snapshot(t: number, i: TokenInfo): Record<string, number> {

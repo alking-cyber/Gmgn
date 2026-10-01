@@ -154,6 +154,16 @@ export const cfg = {
     stopLoss: num("PAPER_SL", 0.7), // multiple of entry: 0.7 = -30%
     maxHoldMin: num("PAPER_MAX_HOLD_MIN", 180),
     costPct: num("PAPER_COST_PCT", 1.5), // slippage + fee, charged on entry and exit
+    // Runner hold: at the take-profit, keep part of a token that is still strong instead of selling it all
+    runner: {
+      enabled: bool("PAPER_RUNNER", pd(false, false, true)),
+      minHolderGrowth: num("RUNNER_MIN_HOLDER_GROWTH", 0.2), // holders up 20%+ since the buy
+      minVolume5m: num("RUNNER_MIN_VOLUME_5M", 30000), // USD traded in the last 5 minutes
+      keepPct: num("RUNNER_KEEP_PCT", 0.5), // share kept; the rest is sold at the take-profit
+      trailPct: num("RUNNER_TRAIL_PCT", 0.3), // kept part exits 30% below its high (never below entry)
+      holderDropPct: num("RUNNER_HOLDER_DROP_PCT", 0.15), // ...or when holders fall 15% from their high
+      maxHoldMin: num("RUNNER_MAX_HOLD_MIN", 720), // ...or 12 hours after the take-profit
+    },
   },
 };
 

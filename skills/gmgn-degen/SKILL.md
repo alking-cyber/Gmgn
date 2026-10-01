@@ -1,7 +1,7 @@
 ---
 name: gmgn-degen
-description: "Memecoin degen playbook on Solana, built to find tokens that can run from ~$100K to tens of millions — ranks early tokens by a runner score learned from past 100x tokens (not a strict pass/fail filter), keeps a watchlist of why past tokens ran thousands of percent, checks one token for the exit-liquidity trap, reads hot narratives, finds copyable smart wallets, and plans moonshot-style trades. Use when the user asks: token apa yang potensinya besar, cari koin potensial / gem / runner, koin yang bisa 100x, kenapa token X naik ribuan persen, update watchlist runner, cek token ini, narasi apa yang lagi panas, cari smart wallet, cara TP/SL, berapa modal per trade."
-argument-hint: "[scan|runners|check <address_or_name>|narrative|wallets|plan] [--chain sol]"
+description: "Memecoin degen playbook on Solana, built to find tokens that can run from ~$100K to tens of millions — ranks early tokens by a runner score learned from past 100x tokens (not a strict pass/fail filter), keeps a watchlist of why past tokens ran thousands of percent, checks one token for the exit-liquidity trap, reads hot narratives, finds copyable smart wallets, and plans trades (2x take-profit, then keep part of tokens that are still strong). Use when the user asks: token apa yang potensinya besar, cari koin potensial / gem / runner, koin yang bisa 100x, kenapa token X naik ribuan persen, update watchlist runner, cek token ini, token sudah 2x tahan atau jual, narasi apa yang lagi panas, cari smart wallet, cara TP/SL, berapa modal per trade."
+argument-hint: "[scan|runners|check <address_or_name>|hold <address> <entry_mcap>|narrative|wallets|plan] [--chain sol]"
 metadata:
   cliHelp: "gmgn-cli market trenches --help && gmgn-cli market trending --help && gmgn-cli token holders --help && gmgn-cli market kline --help && gmgn-cli market hot-searches --help && gmgn-cli portfolio stats --help"
 ---
@@ -24,12 +24,13 @@ metadata:
 
 | Mode | What it answers | Typical user wording |
 |---|---|---|
-| `scan` (default) | Which early tokens look most like past 100× runners right now, ranked, with a moonshot plan | "token apa yang potensinya besar", "cari gem / runner", "koin yang bisa 100x" |
+| `scan` (default) | Which early tokens look most like past 100× runners right now, ranked, with a trade plan | "token apa yang potensinya besar", "cari gem / runner", "koin yang bisa 100x" |
 | `runners` | Which tokens ran thousands of percent recently and why — appended to the user's runner watchlist | "kenapa X naik ribuan persen", "update watchlist runner", "token apa yang baru meledak" |
 | `check` | Is this one token still worth entering, or am I the exit liquidity? | "cek token X", "masih layak masuk?" |
+| `hold` | A position reached its take-profit: keep part of it (still strong) or sell it all? | "token X sudah 2x, tahan atau jual?", "masih kuat nggak?" |
 | `narrative` | Which themes are hot now and which token leads each | "narasi apa yang lagi panas" |
 | `wallets` | Smart wallets slow enough to follow and still profitable | "cari smart wallet" |
-| `plan` | Position size, stop, take-profit ladder | "berapa modal per trade", "TP SL" |
+| `plan` | Position size, stop, take-profit, runner hold | "berapa modal per trade", "TP SL" |
 
 Pick the mode from the user's wording. When unclear, run `scan`.
 
@@ -180,7 +181,7 @@ SMART MONEY: <n> holding now ($<total>), entries $<a>–$<b>; <n> already exited
 HOLDER BASE: <strong|mixed|fragile> — top-20 median entry $<x> vs now $<y>; biggest wallet <p>%; vault <v>%
 LIQUIDITY: $<liq> (<pct>% of mcap) · FLOW 1h: buys <b> / sells <s> · ATH $<ath> (<-%>)
 BIGGEST RISK: <one line>
-PLAN: <moonshot ladder from `plan`, with mcap levels>
+PLAN: <from `plan`, with mcap levels: TP $<2×>, SL $<0.7×>, runner check at TP>
 WHO IS MY EXIT LIQUIDITY? <who bought below you and will sell into you; who is left to buy after you>
 ```
 
@@ -206,19 +207,54 @@ A missing field is "not visible", never zero.
 
 ---
 
-## Mode `plan` — moonshot sizing and exits
+## Mode `plan` — sizing and exits
+
+Tested on 208 age-based replay trades (four sessions, dead tokens included, entry when market cap first crossed $100K, 1.5% cost per side):
 
 | Rule | Value | Why |
 |---|---|---|
-| Size | **3–5% of equity per token** | Most picks die; the few runners pay for them. Small size is what lets you keep taking shots |
+| Size | **3–5% of equity per token** | Most picks die; small size is what lets you keep taking shots |
 | Max open | 10 positions | Spread across narratives, not ten clones of one theme |
-| Stop | −30% from entry, or exit if the token falls > 50% from its high after entry | Tokens that break down early rarely recover; a −20% stop is tighter and tested better on small-target trades |
-| Take-profit ladder | sell 30% at 2× (stake back), 30% at 5×, 20% at 20×, keep 20% with a 40% trailing stop from the peak | Captures part of a run without needing to call the top |
-| Time stop | review after 6 hours; exit if still below entry | Most moves happen in the first hours |
-| Never | fixed +15–30% take-profit on everything | Lost money in every tested session (wins too small after ~3% round-trip cost) |
-| Costs | assume 1.5% per side | Slippage + fees on small tokens |
+| Stop | **−30% from entry** | Needed: holding without a stop averaged about −89% per token |
+| Take-profit | **at 2× (+100%), then the `hold` check** | Among the most consistent of 125 exit rules across sessions; +15–30% targets, 5–20× targets and ladders/trailing from the start did worse |
+| Runner hold | strong at 2× → sell 50%, keep 50% with a 30% trailing stop that never goes below the entry; weak → sell all | Holding everything always lost; holding only strong tokens was the best variant (see `hold`) |
+| Never | add to a position because market cap crossed $300K / $1M / $3M | Lost in the age-based test (42 of 45 tokens that crossed $300K died; every rule at $1M lost) |
+| Never | fixed +15–30% take-profit on everything | Wins too small after ~3% round-trip cost |
 
-Honesty note to include when giving the plan: in replays, wide trailing exits looked spectacular in one session (+66% per trade) and lost in the next (−6%); the result depended on catching a few huge runners. The ladder only works with small size and many independent shots. Paper-trade first (`npm run pipeline:loose` in this repo).
+Set it at the buy with `gmgn-swap` condition orders, so the take-profit and stop live from the first second (most of the gains — and most of the losses — came in the first minutes):
+
+```bash
+--condition-orders '[{"order_type":"profit_stop","side":"sell","price_scale":"100","sell_ratio":"50"},{"order_type":"loss_stop","side":"sell","price_scale":"30","sell_ratio":"100"}]'
+```
+
+This sells half at 2× automatically; run `hold` right after it fills to decide the other half.
+
+Honesty note to include when giving the plan, with the numbers: per-trade average was about −5% to +12% depending on the session (−4.7% over all 208 trades in the cautious fill model). The biggest loss source is rugs inside one minute, where a −30% stop fills near −65%; if stops had filled at −30%, the average would have been about +7%. So the edge has to come from avoiding rugs before the buy (Step 2 kills, holder checks), which historical data cannot test. Paper-trade first (`npm run pipeline:loose` in this repo runs this exact plan, runner hold included).
+
+---
+
+## Mode `hold` — the take-profit hit: keep part, or sell it all?
+
+Inputs: token address and the market cap (or price) at the buy. If the user does not know them, read them from `portfolio activity` for their wallet, or ask.
+
+1. `token info --chain sol --address <ADDR> --raw`. Needed now: `stat.holder_count`, `price.volume_5m`, `wallet_tags_stat.smart_wallets + wallet_tags_stat.renowned_wallets`. Needed at the buy: the same three numbers. If the user did not record them, use the `check` card or alert from the buy time; if none exists, say the holder test cannot be done and judge on volume + smart money only.
+2. Strong if **all** hold:
+   - holders up **≥ 20%** since the buy
+   - 5-minute volume **≥ $30K**
+   - smart money + KOL wallets **not fewer** than at the buy
+   - optional narrative check: `hot-searches --interval 1h` still lists the token or its theme (the token still leads its clones by holders)
+3. Answer:
+
+```
+HOLD CHECK <SYMBOL>: <STRONG → keep 50% | WEAK → sell the rest>
+Holders <then> → <now> (<+x%>) · 5m volume $<v> · smart+KOL <then> → <now> · narrative: <hot/cooling/not visible>
+If keeping: exit the kept half on the first of — price 30% below its high since now (never below entry $<entry mcap>),
+holders down 15% from their high, or 12 hours. Re-run `hold` every few hours to update the high.
+```
+
+For the trailing part, `gmgn-swap` can attach a trailing order on the remainder (`profit_stop_trace` with `drawdown_rate` 30) — hand off to `gmgn-swap` / `gmgn-token-buy` for any order; this skill never trades.
+
+Evidence, to state when asked: with 5-minute volume as the only check (holder history is not available historically), this improved the average trade by about one point over selling everything (−3.9% → −2.6% per trade over 151 trades) and beat holding everything without a check (−5.7%). The holder and smart-money conditions are untested until paper trading measures them.
 
 ---
 
@@ -230,7 +266,7 @@ Honesty note to include when giving the plan: in replays, wide trailing exits lo
 Narrative: <leader of "<theme>" with <k> clones | original | copy of <leader>> · hot-search: <yes/no>
 Smart/KOL holding: <n> ($<total>, entries $<a>–$<b>) · Biggest wallet <p>% · Bundle <b>% · Vault <v>%
 For: <strongest reason> · Risk: <biggest risk>
-Plan: size 3–5% · stop $<0.7×mcap> · sell 30% $<2×> · 30% $<5×> · 20% $<20×> · trail the rest 40%
+Plan: size 3–5% · SL $<0.7×mcap> · TP $<2×mcap> → `hold` check: strong = keep 50% (trail 30%, floor at entry), weak = sell all
 ```
 
 End every `scan` answer with: these are ranked bets, not predictions — most will die; the edge, if any, comes from small size across many shots and letting the rare runner run.
