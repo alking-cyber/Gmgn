@@ -146,7 +146,7 @@ export function report(db: Record<string, Tracked>, t = now()): string {
   ].join("\n");
 }
 
-const isMain = process.argv[1]?.endsWith("runner-tracker.ts");
+const isMain = [process.argv[1], process.env.pm_exec_path].some((p) => p?.endsWith("runner-tracker.ts")); // pm2 runs it through its own wrapper
 if (isMain) {
   const db = load();
   if (process.argv.includes("--report")) {
