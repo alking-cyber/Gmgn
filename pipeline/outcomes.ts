@@ -9,7 +9,8 @@
  *   - the same exit as the paper book (stop, trailing stop, costs), plus the plain peak and low;
  *   - one row per group: alerted, and each rule that turned tokens down at its last stage.
  * A filter helps only if the tokens it turned down did worse than the ones it let through.
- * Candles come from the API (1m for 3h after the entry, then 1h) and are cached in
+ * Candles come from the API (1m for the first 100 minutes after the entry, one call; then 1h) and are
+ * cached per token, so an interrupted run (Ctrl+C) picks up where it stopped. Cached in
  * <data>/outcomes/; a token is fetched again while it is less than TRACK days old.
  */
 
@@ -68,10 +69,11 @@ if (!REPORT_ONLY) {
   });
   console.log(`fetching candles for ${todo.length} tokens (cached: ${decisions.length - todo.length}); this runs slowly on purpose`);
   let n = 0;
+  const started = Date.now();
   for (const d of todo) {
     try {
       const from = d.at - (d.at % 60);
-      const m1End = Math.min(T, from + 3 * 3600);
+      const m1End = Math.min(T, from + 100 * 60); // one kline call returns at most 100 candles
       const m1 = await api.klines(cfg.chain, d.address, "1m", from, m1End);
       const h1From = m1End - (m1End % 3600);
       const h1 = m1End < T ? await api.klines(cfg.chain, d.address, "1h", h1From, Math.min(T, d.at + TRACK_DAYS * 86400)) : [];
@@ -82,7 +84,10 @@ if (!REPORT_ONLY) {
     } catch (err) {
       console.error(`[outcomes] ${d.symbol}: ${(err as Error).message}`);
     }
-    if (++n % 25 === 0) console.log(`  ${n} of ${todo.length}`);
+    if (++n % 5 === 0 || n === todo.length) {
+      const left = ((Date.now() - started) / n) * (todo.length - n);
+      console.log(`  ${n} of ${todo.length} tokens, about ${Math.ceil(left / 60000)} min left`);
+    }
   }
 }
 
