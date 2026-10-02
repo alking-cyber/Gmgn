@@ -129,6 +129,22 @@ Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_O
 
 `pipeline:replay` (opsi: `REPLAY_TPS=1.15,1.3,2`, `REPLAY_SLS=0.9,0.7`, `REPLAY_DIR=<folder cache lama>` untuk memakai ulang data) mengambil token berdasarkan **umur** (termasuk yang sudah mati), memutar ulang aturan di atas per menit tanpa melihat harga ke depan, lalu membandingkan berbagai kombinasi TP/SL. Satu kali jalan hanya mewakili satu sesi pasar, jadi ulangi di hari yang berbeda. Data holder, top 10, bundler, dan dev pada waktu itu tidak tersedia, sehingga aturan-aturan tersebut tidak ikut di-replay.
 
+## Backtest 5 hari: `pipeline:backtest`
+
+```bash
+pm2 stop all                      # bebaskan kuota API dulu (satu API key dipakai bersama)
+npm run pipeline:backtest         # 5 hari terakhir, aturan profil early (sekitar 1-2 jam)
+npm run pipeline:backtest -- --days 2
+pm2 start all                     # jalankan lagi bot-nya
+```
+
+Memutar ulang aturan entry profil early dan aturan exit paper trading pada candle 1 menit, untuk semua token launchpad yang diluncurkan dalam 5 hari terakhir (diambil per jam peluncuran, termasuk stonkfun), tanpa melihat harga ke depan. GMGN hanya menyimpan token yang belum lulus bonding curve selama beberapa jam, sehingga hari-hari yang lebih lama hanya berisi token yang lulus. Karena itu laporan menampilkan:
+- **perkiraan berbobot**: rasio lulus dan rugi token yang tidak lulus diukur di jam-jam terbaru yang datanya masih lengkap, lalu dipakai untuk membobot trade token yang lulus dari kelima hari;
+- **akun $50 biasa** di jam-jam terbaru yang lengkap saja (tanpa pembobotan);
+- hasil per hari (hanya untuk dibandingkan antar hari, karena condong terlalu bagus).
+
+Semua trade simulasi disimpan di `pipeline/data-backtest/trades.csv`. Hasilnya di-cache, jadi kalau terhenti, cukup jalankan lagi. Kalau muncul pesan bahwa API dibatasi, hentikan proses lain yang memakai API key yang sama, tunggu 5 menit, lalu ulangi.
+
 ## Profil `early`: entry di $10 rb
 
 ```bash
