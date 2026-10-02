@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { cfg } from "./config.js";
 import { GATE, runnerGate } from "./gate.js";
 import { GmgnApi, type Candle, type RankRow } from "./gmgn.js";
+import { simulate } from "./sim.js";
 import { now } from "./store.js";
 
 const arg = (name: string, def: number) => {
@@ -37,7 +38,6 @@ const P = cfg.paper;
 const T = now();
 const TYPES = ["new_creation", "near_completion", "completed"] as const;
 type Kind = (typeof TYPES)[number];
-const MIN_TRADE_VOLUME = 1000; // candles with less than $1K traded cannot fill a $5 order at that price
 
 mkdirSync(join(DIR, "k"), { recursive: true });
 const load = <X>(f: string, d: X): X => (existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : d);
@@ -120,28 +120,9 @@ for (const { row: r } of listed) {
 
 interface Trade { symbol: string; kind: Kind; at: number; ageH: number; ret: number; exits: number; endAt: number; why: string; peakX: number }
 function trade(path: Candle[], crossMcap: number, supply: number): Omit<Trade, "symbol" | "kind" | "ageH"> | null {
-  const K = path.filter((k) => (k.volume || 0) >= MIN_TRADE_VOLUME);
-  if (K.length < 2) return null;
-  const e = K[0].o;
-  if (e * supply > cfg.s3.maxChaseMult * crossMcap) return null; // already ran away: the pipeline skips it
-  const cost = P.costPct / 100;
-  let peak = 1;
-  for (let j = 1; j < K.length; j++) {
-    const k = K[j];
-    const o = k.o / e, h = k.h / e, l = k.l / e, c = k.c / e;
-    const trailing = P.trailArm > 0 && peak >= P.trailArm;
-    const stop = trailing ? Math.max(P.stopLoss, peak * (1 - P.trailPct)) : P.stopLoss;
-    let x: number | null = null;
-    let why = "";
-    if (k.t - K[0].t >= P.maxHoldMin * 60) { x = o; why = "time"; }
-    else if (o <= stop) { x = o; why = trailing ? "trailing (gap)" : "stop (gap)"; }
-    else if (l <= stop) { x = c >= 0.5 * stop ? stop : (stop + c) / 2; why = trailing ? "trailing" : "stop"; }
-    else if (P.takeProfit > 0 && h >= P.takeProfit) { x = P.takeProfit; why = "target"; }
-    peak = Math.max(peak, h);
-    if (x != null) return { at: K[0].t, ret: (x * (1 - cost)) / (1 + cost) - 1, exits: 1, endAt: k.t + 60, why, peakX: peak };
-  }
-  const x = K[K.length - 1].c / e;
-  return { at: K[0].t, ret: (x * (1 - cost)) / (1 + cost) - 1, exits: 1, endAt: K[K.length - 1].t + 60, why: "still open", peakX: peak };
+  // already ran away past maxChaseMult x the cross: the pipeline skips it
+  const t = simulate(path, P, (cfg.s3.maxChaseMult * crossMcap) / supply);
+  return t && { at: t.at, ret: t.ret, exits: 1, endAt: t.endAt, why: t.why, peakX: t.peakX };
 }
 
 const trades: Trade[] = [];
