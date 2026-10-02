@@ -40,11 +40,54 @@ pm2 logs runner
 
 State disimpan di `pipeline/data/state.json`, jadi kalau proses restart, tracking dan jurnal lanjut dari posisi terakhir.
 
+## Memasang di komputer sendiri (Windows, Mac, Linux)
+
+1. **Pasang Node.js 20 atau lebih baru** dari https://nodejs.org (pilih versi LTS), lalu **Git** dari https://git-scm.com. Di Windows, setelah itu buka **PowerShell**; di Mac/Linux buka **Terminal**. Cek dengan `node -v` dan `git --version`.
+2. **Ambil kode dan pasang dependensi:**
+   ```bash
+   git clone https://github.com/alking-cyber/Gmgn.git
+   cd Gmgn
+   git checkout claude/npm-ci-dzcpax
+   npm ci
+   ```
+3. **Simpan API key** (buat key baru di https://gmgn.ai/ai). File ini cukup berisi API key saja; nilai lain di sini akan menimpa setelan pipeline.
+   - Mac/Linux:
+     ```bash
+     mkdir -p ~/.config/gmgn && echo "GMGN_API_KEY=API_KEY_KAMU" > ~/.config/gmgn/.env
+     ```
+   - Windows (PowerShell):
+     ```powershell
+     New-Item -ItemType Directory -Force "$HOME\.config\gmgn" | Out-Null
+     Set-Content "$HOME\.config\gmgn\.env" "GMGN_API_KEY=API_KEY_KAMU"
+     ```
+4. **Tes tanpa API:** `npm run pipeline:selftest` — harus diakhiri `all gate checks passed`.
+5. **Coba satu scan:** `npm run pipeline:early -- --once`.
+6. **Jalankan terus di background dengan pm2:**
+   ```bash
+   npm install -g pm2
+   pm2 start pipeline/ecosystem.config.cjs --only early     # hanya early (disarankan di paket Free)
+   # atau ketiganya sekaligus, kuota sudah dibagi di file itu:
+   pm2 start pipeline/ecosystem.config.cjs
+   pm2 status            # lihat yang berjalan
+   pm2 logs early        # lihat log (Ctrl+C untuk keluar dari log)
+   pm2 stop all          # hentikan
+   ```
+   Supaya otomatis jalan lagi setelah komputer menyala ulang: `pm2 save`, lalu `pm2 startup` di Mac/Linux (ikuti perintah yang ditampilkan). Di Windows pasang `npm install -g pm2-windows-startup` lalu `pm2-startup install`.
+7. **Lihat hasil paper trading** kapan saja:
+   ```bash
+   npm run pipeline:evaluate -- --profile early
+   npm run pipeline:runners -- --report
+   ```
+
+Komputer harus tetap menyala dan terhubung internet (atur Windows/Mac agar tidak sleep). Data tersimpan di `pipeline/data-early/`, `pipeline/data-loose/` dan `pipeline/data-runners/`. Untuk memperbarui kode: `pm2 stop all`, `git pull`, `npm ci`, lalu `pm2 restart all`.
+
+Profil bisa dipilih dengan `--profile <nama>` (berjalan di semua sistem operasi) atau variabel `PIPELINE_PROFILE`.
+
 ## Profil `newlaunch`: token baru, mcap kecil
 
 ```bash
-npm run pipeline:newlaunch                         # atau: PIPELINE_PROFILE=newlaunch npm run pipeline
-PIPELINE_PROFILE=newlaunch npm run pipeline:evaluate
+npm run pipeline:newlaunch
+npm run pipeline:evaluate -- --profile newlaunch
 ```
 
 Profil ini memantau token launchpad (`/v1/trenches`: new, near completion, completed) tiap 20 detik, dan datanya disimpan terpisah di `data-newlaunch/`. Daftar launchpad bawaan trenches tidak memasukkan stonkfun, padahal 7 dari 15 runner $100 rb → $10 jt+ dalam 30 hari terakhir berasal dari sana. Karena itu setiap scan menambah satu panggilan khusus untuk stonkfun (`TRENCH_EXTRA_PLATFORMS`, kosongkan untuk mematikan).
@@ -62,7 +105,7 @@ Semua angka bisa diubah lewat variabel `S1_*`, `S2_*`, `S3_*`, dan `TRENCH_*` di
 
 ```bash
 npm run pipeline:loose                             # scan + paper trading, jalan terus
-PIPELINE_PROFILE=loose npm run pipeline:evaluate   # laporan, termasuk hasil paper trading
+npm run pipeline:evaluate -- --profile loose   # laporan, termasuk hasil paper trading
 npm run pipeline:replay                            # uji ulang aturan yang sama pada token 3-10 jam terakhir
 ```
 
@@ -90,7 +133,7 @@ Pengaturan bisa diubah lewat `PAPER_CAPITAL`, `PAPER_POSITION_PCT`, `PAPER_MAX_O
 
 ```bash
 npm run pipeline:early                             # scan + paper trading, jalan terus
-PIPELINE_PROFILE=early npm run pipeline:evaluate
+npm run pipeline:evaluate -- --profile early
 ```
 
 Sama dengan profil loose (modal $50, stop −30%, trailing 30% setelah 3×, biaya $0,10 per transaksi), tapi entry dipindah ke titik tembus mcap **$10 rb**. Syaratnya: titik tembus terjadi paling lambat **60 menit** setelah launch, volume 5 menit menjelang titik tembus minimal **$5 rb**, token tidak dibuka di atas $10 rb sejak launch, dan mcap saat dibeli tidak lebih dari 1,5× titik tembus. Token dibeli begitu pertama kali terlihat, tanpa menunggu beberapa scan. Data disimpan di `data-early/`.

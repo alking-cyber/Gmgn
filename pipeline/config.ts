@@ -26,7 +26,9 @@ import "../src/config.js";
  *             test (graduated tokens from 2,095 + age-based sessions for the ones that died) a $10K
  *             entry averaged about +5-7% per trade with the same exit; the range still includes losses
  */
-const PROFILE = process.env.PIPELINE_PROFILE || "trending";
+// `--profile <name>` on the command line (works on Windows too), else PIPELINE_PROFILE; the last --profile wins
+const profileArg = process.argv.lastIndexOf("--profile");
+const PROFILE = (profileArg > 0 ? process.argv[profileArg + 1] : undefined) || process.env.PIPELINE_PROFILE || "trending";
 if (!["trending", "newlaunch", "loose", "early"].includes(PROFILE)) {
   throw new Error(`PIPELINE_PROFILE must be "trending", "newlaunch", "loose" or "early", got "${PROFILE}"`);
 }
