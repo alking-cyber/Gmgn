@@ -114,7 +114,8 @@ export class Paper {
       return undefined;
     }
     const size = Math.min(this.s.cash - this.c.feeUsd, this.equity() * this.c.positionPct);
-    if (size < 0.01) return undefined;
+    // a position smaller than 10x the network fee loses most of itself to fees: skip it
+    if (size < Math.max(0.01, 10 * this.c.feeUsd)) return undefined;
     this.s.cash -= size + this.c.feeUsd;
     const p: PaperPosition = { symbol, entryPrice: price, size, openedAt: t, entry };
     this.s.positions[address] = p;
