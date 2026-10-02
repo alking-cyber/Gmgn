@@ -5,6 +5,9 @@
  */
 
 import type { Funding } from "./gate.js";
+import { readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { OpenApiClient } from "../src/client/OpenApiClient.js";
 import { getConfig } from "../src/config.js";
 import { sanitizeString } from "../src/sanitize.js";
@@ -247,8 +250,10 @@ export class Throttle {
         const t = Date.now();
         this.level = Math.max(0, this.level - ((t - this.last) / 1000) * this.rate);
         this.last = t;
+        this.syncShared();
         if (t < this.pausedUntil) {
           await sleep(this.pausedUntil - t);
+          this.level = this.capacity; // resume slowly, not with a burst
           continue;
         }
         if (this.level + w <= this.capacity) {
@@ -263,9 +268,31 @@ export class Throttle {
     return p;
   }
 
-  /** Stop all calls until the server's reset time (after a 429). */
+  /**
+   * Stop all calls until the server's reset time (after a 429). The ban is per IP, so the pause is
+   * also written to a file every job on this machine reads: while one job waits, a second job
+   * calling into the ban would extend it for both (each call during a ban adds 5s, up to 5 minutes).
+   */
   pauseUntil(unixSec: number): void {
-    this.pausedUntil = Math.max(this.pausedUntil, unixSec * 1000 + 1000);
+    this.pausedUntil = Math.max(this.pausedUntil, unixSec * 1000 + 3000);
+    try {
+      if (this.pausedUntil > sharedPause()) writeFileSync(PAUSE_FILE, String(this.pausedUntil));
+    } catch {
+      // the local pause still holds
+    }
+  }
+
+  private syncShared(): void {
+    this.pausedUntil = Math.max(this.pausedUntil, sharedPause());
+  }
+}
+
+const PAUSE_FILE = process.env.GMGN_PAUSE_FILE || join(tmpdir(), "gmgn-rate-limit-pause");
+function sharedPause(): number {
+  try {
+    return Number(readFileSync(PAUSE_FILE, "utf8")) || 0;
+  } catch {
+    return 0;
   }
 }
 
