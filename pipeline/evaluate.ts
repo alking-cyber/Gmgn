@@ -196,7 +196,9 @@ const closes = byType("paper_close") as unknown as Array<{
 }>;
 const opens = byType("paper_open");
 if (opens.length) {
-  console.log(`\n=== Paper trading (${cfg.paper.positionPct * 100}% per trade, TP x${cfg.paper.takeProfit}, SL x${cfg.paper.stopLoss}) ===`);
+  const P = cfg.paper;
+  console.log(`\n=== Paper trading (${P.positionPct * 100}% per trade, stop x${P.stopLoss}` + (P.takeProfit > 0 ? `, target x${P.takeProfit}` : "") +
+    (P.trailArm > 0 ? `, trailing ${P.trailPct * 100}% once ${P.trailArm}x` : "") + `) ===`);
   const wins = closes.filter((c) => c.ret > 0).length;
   const byReason = new Map<string, number>();
   for (const c of closes) byReason.set(c.reason, (byReason.get(c.reason) ?? 0) + 1);
@@ -210,6 +212,21 @@ if (opens.length) {
       `worst ${pcs(rets[0])}, best ${pcs(rets[rets.length - 1])}`);
     const days = (closes[closes.length - 1].t - opens[0].t) / 86400;
     console.log(`over ${days.toFixed(1)} days. Treat as evidence only after 100+ closed trades across several days.`);
+  }
+  const N = Number(process.env.PAPER_LIST) || 20;
+  const time = (t: number) => new Date(t * 1000).toLocaleString("sv-SE").slice(0, 16);
+  if (closes.length) {
+    console.log(`\nlast ${Math.min(N, closes.length)} closed trades (local time):`);
+    for (const c of closes.slice(-N)) {
+      console.log(`  ${time(c.t)}  ${String(c.symbol).slice(0, 14).padEnd(14)} ${pcs(c.ret).padStart(8)}  $${c.size.toFixed(2)} -> $${c.proceeds.toFixed(2)}  ${c.reason}, held ${Math.round(c.heldMin)}m`);
+    }
+  }
+  const closedAt = new Map<string, number>();
+  for (const c of closes as unknown as Array<{ address: string; t: number }>) closedAt.set(c.address, c.t);
+  const stillOpen = opens.filter((o) => !(closedAt.get(o.address)! >= o.t));
+  if (stillOpen.length) {
+    console.log(`\nopen positions:`);
+    for (const o of stillOpen) console.log(`  ${time(o.t)}  ${String(o.symbol).slice(0, 14).padEnd(14)} $${Number(o.size).toFixed(2)} at ${Number(o.price).toPrecision(3)}  ${o.address}`);
   }
 }
 
