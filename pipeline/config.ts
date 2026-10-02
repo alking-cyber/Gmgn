@@ -10,6 +10,7 @@
 
 // Side effect: loads ~/.config/gmgn/.env and ./.env, so the overrides below see them.
 import "../src/config.js";
+import { fileURLToPath } from "node:url";
 
 /**
  * PIPELINE_PROFILE picks a set of defaults; any variable below still overrides it.
@@ -66,7 +67,8 @@ function list(name: string, def: string[]): string[] {
 export const cfg = {
   profile: PROFILE,
   chain: str("PIPELINE_CHAIN", "sol"),
-  dataDir: str("PIPELINE_DATA_DIR", new URL(pd("./data", "./data-newlaunch", "./data-loose", "./data-early"), import.meta.url).pathname),
+  // fileURLToPath, not URL.pathname: on Windows .pathname gives "/C:/..." and the folder becomes C:\C:\...
+  dataDir: str("PIPELINE_DATA_DIR", fileURLToPath(new URL(pd("./data", "./data-newlaunch", "./data-loose", "./data-early"), import.meta.url))),
   scanIntervalSec: num("SCAN_INTERVAL_SEC", pd(30, 20)),
   journalIntervalSec: num("JOURNAL_INTERVAL_SEC", 30),
   discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || "",
