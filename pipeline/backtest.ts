@@ -180,6 +180,26 @@ console.log(`trades (before network fees):`);
 console.log(`  graduated, all ${DAYS} days     n=${String(G.length).padStart(4)}  avg ${pct(avg(G.map((t) => t.ret)))}  (looks good because the losers are missing)`);
 console.log(`  recent ${completeH.toFixed(0)}h, graduated    n=${String(Grecent.length).padStart(4)}  avg ${pct(avg(Grecent.map((t) => t.ret)))}`);
 console.log(`  recent ${completeH.toFixed(0)}h, not graduated n=${String(N.length).padStart(4)}  avg ${pct(avg(N.map((t) => t.ret)))}`);
+
+// Is the ungraduated listing really complete over those hours? If GMGN drops dead tokens as they age,
+// ungraduated passers per hour shrink with age and the graduation share below is overstated.
+const bands = [[1, 3], [3, 6], [6, 12], [12, 24], [24, 48], [48, DAYS * 24]].filter(([a]) => a < DAYS * 24);
+console.log(`\ncoverage by token age (passers per hour of launches should stay roughly flat if the listing is complete):`);
+for (const [a, b] of bands) {
+  const ts = trades.filter((t) => t.ageH >= a && t.ageH < b);
+  const ng = ts.filter((t) => !graduated(t)).length, gr = ts.length - ng;
+  const ul = listed.filter((x) => x.kind === "new_creation" && (T - x.row.createdAt) / 3600 >= a && (T - x.row.createdAt) / 3600 < b).length;
+  console.log(`  ${`${a}-${b}h`.padEnd(7)} ungraduated listed ${(ul / (b - a)).toFixed(1).padStart(6)}/h | passers graduated ${(gr / (b - a)).toFixed(1).padStart(5)}/h, not graduated ${(ng / (b - a)).toFixed(1).padStart(5)}/h` +
+    (ts.length ? ` | ${Math.round((gr / ts.length) * 100)}% graduated` : ""));
+}
+const gAvg = avg(Grecent.map((t) => t.ret)), nAvg = avg(N.map((t) => t.ret));
+if (Number.isFinite(gAvg) && Number.isFinite(nAvg) && gAvg > nAvg) {
+  const be = -nAvg / (gAvg - nAvg);
+  console.log(`\nper trade if the true graduation share of passers were (recent averages ${pct(gAvg)} graduated / ${pct(nAvg)} not):`);
+  console.log("  " + [0.1, 0.2, 0.3, 0.5, 0.7].map((q) => `${Math.round(q * 100)}% -> ${pct(q * gAvg + (1 - q) * nAvg)}`).join("   "));
+  console.log(`  break-even at ${Math.round(be * 100)}% graduating; only a live recording of every crosser measures the true share`);
+}
+
 if (N.length >= 5 && G.length >= 5) {
   const est = p * avg(G.map((t) => t.ret)) + (1 - p) * avg(N.map((t) => t.ret));
   let seed = 7;
@@ -193,6 +213,7 @@ if (N.length >= 5 && G.length >= 5) {
   bs.sort((x, y) => x - y);
   console.log(`\nWEIGHTED ESTIMATE per trade: ${pct(est)}  (90% range ${pct(bs[50])} .. ${pct(bs[949])})`);
   console.log(`  ${Math.round(p * 100)}% of recent passers graduated; weight = that share for graduated trades, the rest at the not-graduated average`);
+  console.log(`  valid only if the coverage table above is flat; if ungraduated passers thin out with age, this share is too high`);
   const fin: number[] = [];
   for (let i = 0; i < 2000; i++) {
     let eq = P.startCapital;
