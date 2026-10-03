@@ -303,6 +303,8 @@ const sharedPause = () => sharedStamp(PAUSE_FILE);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+let lastCapWarn = 0;
+
 const WEIGHT = { rank: 3, tokenInfo: 1, kline: 2, trenches: 2, holders: 5, traders: 5 };
 
 export interface Candle {
@@ -363,6 +365,11 @@ export class GmgnApi implements GmgnSource {
     const rows: RankRow[] = [];
     for (const type of q.types) {
       const list = Array.isArray(data[type]) ? (data[type] as Obj[]) : [];
+      // a full page means more tokens matched than were returned: the scan misses some
+      if (q.limit && list.length >= q.limit && Date.now() - lastCapWarn > 600_000) {
+        lastCapWarn = Date.now();
+        console.warn(`[scan] trenches ${type} returned the full ${q.limit} rows: more tokens matched than the scan sees`);
+      }
       for (const r of list) if (r && r.address) rows.push(parseTrenchRow(r));
     }
     return rows;
