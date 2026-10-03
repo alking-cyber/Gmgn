@@ -136,6 +136,13 @@ if (ti > 0) {
   }
 }
 
+// npm run pipeline:outcomes -- --profile early --report --list-dead   alerted tokens that came back without candles
+if (process.argv.includes("--list-dead")) {
+  const ds = dead.filter((d) => d.group === "ALERT (bought)" && !load(d.address)!.path.length);
+  console.log(`\nalerted tokens whose candles came back empty (${ds.length}); open one on gmgn.ai to see if it really stopped trading:`);
+  for (const d of ds.slice(0, 15)) console.log(`  ${new Date(d.at * 1000).toLocaleString("sv-SE")}  ${d.symbol.slice(0, 14).padEnd(14)} ${d.address}`);
+}
+
 console.log(`${rows.length} tokens traded after the decision, ${dead.length} dead (no candle with $${MIN_TRADE_VOLUME}+ traded after it)` +
   (noData ? `, ${noData} not fetched yet` : "") + "\n" +
   (dead.length ? `(of the dead, ${emptyDead} came back with no candles at all and ${dead.length - emptyDead} with only small candles)\n` : ""));
