@@ -18,6 +18,8 @@ import { join } from "node:path";
 import { cfg } from "./config.js";
 import { GmgnApi, sharedPause, type RankRow } from "./gmgn.js";
 import { now, readJsonl } from "./store.js";
+import { OpenApiClient } from "../src/client/OpenApiClient.js";
+import { getConfig } from "../src/config.js";
 
 if (!process.env.KLINE_MIN_GAP_MS) process.env.KLINE_MIN_GAP_MS = "2500";
 const MIN_MCAP = Number(process.env.MISSED_MIN_MCAP) || 100_000;
@@ -56,6 +58,16 @@ const maxAge = Math.min(minutes(q.maxCreated), cfg.s1.maxAgeMin) * 60;
 
 const api = new GmgnApi(Number(process.env.MISSED_RATE_LIMIT) || 0.8, undefined, 8);
 const T = now();
+// --sample: the raw price / market-cap / time fields of a few rows, to check how they are read
+if (process.argv.includes("--sample")) {
+  const raw = (await new OpenApiClient(getConfig()).getTrenches(cfg.chain, ["completed", "new_creation"], undefined, 3, { max_created: "24h" })) as Record<string, unknown>;
+  const data = (raw.data ?? raw) as Record<string, Record<string, unknown>[]>;
+  const keys = ["symbol", "price", "market_cap", "usd_market_cap", "total_supply", "circulating_supply", "created_timestamp", "creation_timestamp", "open_timestamp", "complete_timestamp", "launchpad_platform", "exchange"];
+  for (const type of ["completed", "new_creation"]) {
+    for (const r of (data[type] ?? []).slice(0, 3)) console.log(type, JSON.stringify(Object.fromEntries(keys.map((k) => [k, r[k]]))));
+  }
+  process.exit(0);
+}
 console.log(`listing tokens launched in the last 24h now worth $${MIN_MCAP / 1000}K+...`);
 const wait = sharedPause() - Date.now();
 if (wait > 0) console.log(`(another job hit the rate limit: all jobs wait ${Math.ceil(wait / 1000)}s before the next call)`);
