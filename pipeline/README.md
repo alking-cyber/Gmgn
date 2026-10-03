@@ -78,6 +78,7 @@ State disimpan di `pipeline/data/state.json`, jadi kalau proses restart, trackin
    npm run pipeline:evaluate -- --profile early
    npm run pipeline:runners -- --report
    npm run pipeline:outcomes -- --profile early   # nasib SEMUA token yang dilihat, termasuk yang tidak di-alert
+   npm run pipeline:missed -- --profile early     # token yang naik besar 24 jam terakhir: dilihat bot atau tidak, dan kenapa
    ```
 
 Komputer harus tetap menyala dan terhubung internet (atur Windows/Mac agar tidak sleep). Data tersimpan di `pipeline/data-early/`, `pipeline/data-loose/` dan `pipeline/data-runners/`. Untuk memperbarui kode: `pm2 stop all`, `git pull`, `npm ci`, lalu `pm2 restart all`.

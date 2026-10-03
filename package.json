@@ -28,7 +28,8 @@
     "pipeline:replay": "tsx pipeline/replay.ts --profile loose",
     "pipeline:runners": "tsx pipeline/runner-tracker.ts",
     "pipeline:backtest": "tsx pipeline/backtest.ts --profile early",
-    "pipeline:outcomes": "tsx pipeline/outcomes.ts"
+    "pipeline:outcomes": "tsx pipeline/outcomes.ts",
+    "pipeline:missed": "tsx pipeline/missed.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",
