@@ -23,3 +23,11 @@ testing/
 .claude/
 .agents/
 skills-lock.json
+
+# Runner pipeline data (events, journal, state)
+pipeline/data/
+pipeline/data-newlaunch/
+pipeline/data-loose/
+pipeline/data-runners/
+pipeline/data-early/
+pipeline/data-backtest/

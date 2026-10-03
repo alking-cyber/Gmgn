@@ -1,7 +1,7 @@
 {
   "name": "gmgn-cli",
   "version": "1.6.6",
-  "description": "GMGN OpenAPI CLI — call GMGN market, token, portfolio and swap APIs from the command line",
+  "description": "GMGN OpenAPI CLI \u2014 call GMGN market, token, portfolio and swap APIs from the command line",
   "type": "module",
   "bin": {
     "gmgn-cli": "./dist/index.js"
@@ -17,7 +17,19 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "prepublishOnly": "npm run build",
-    "publish:provenance": "npm publish --provenance --access public"
+    "publish:provenance": "npm publish --provenance --access public",
+    "pipeline": "tsx pipeline/run.ts",
+    "pipeline:evaluate": "tsx pipeline/evaluate.ts",
+    "pipeline:selftest": "tsx pipeline/selftest.ts --clean && tsx pipeline/selftest-newlaunch.ts --profile newlaunch && tsx pipeline/selftest-paper.ts --profile loose && tsx pipeline/selftest-loose.ts --profile loose && tsx pipeline/selftest-early.ts --profile early && tsx pipeline/selftest-gate.ts",
+    "pipeline:history": "tsx pipeline/history.ts",
+    "pipeline:newlaunch": "tsx pipeline/run.ts --profile newlaunch",
+    "pipeline:loose": "tsx pipeline/run.ts --profile loose",
+    "pipeline:early": "tsx pipeline/run.ts --profile early",
+    "pipeline:replay": "tsx pipeline/replay.ts --profile loose",
+    "pipeline:runners": "tsx pipeline/runner-tracker.ts",
+    "pipeline:backtest": "tsx pipeline/backtest.ts --profile early",
+    "pipeline:outcomes": "tsx pipeline/outcomes.ts",
+    "pipeline:missed": "tsx pipeline/missed.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",
