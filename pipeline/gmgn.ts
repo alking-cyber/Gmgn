@@ -299,7 +299,8 @@ function writeStamp(file: string, ms: number): void {
     // the local spacing still holds
   }
 }
-const sharedPause = () => sharedStamp(PAUSE_FILE);
+/** Unix ms until which every job on this machine holds its calls after a 429 (0 = no pause). */
+export const sharedPause = () => sharedStamp(PAUSE_FILE);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

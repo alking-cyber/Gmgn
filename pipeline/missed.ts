@@ -16,7 +16,7 @@
 
 import { join } from "node:path";
 import { cfg } from "./config.js";
-import { GmgnApi, type RankRow } from "./gmgn.js";
+import { GmgnApi, sharedPause, type RankRow } from "./gmgn.js";
 import { now, readJsonl } from "./store.js";
 
 if (!process.env.KLINE_MIN_GAP_MS) process.env.KLINE_MIN_GAP_MS = "2500";
@@ -56,6 +56,9 @@ const maxAge = Math.min(minutes(q.maxCreated), cfg.s1.maxAgeMin) * 60;
 
 const api = new GmgnApi(Number(process.env.MISSED_RATE_LIMIT) || 0.8, undefined, 3);
 const T = now();
+console.log(`listing tokens launched in the last 24h now worth $${MIN_MCAP / 1000}K+...`);
+const wait = sharedPause() - Date.now();
+if (wait > 0) console.log(`(another job hit the rate limit: all jobs wait ${Math.ceil(wait / 1000)}s before the next call)`);
 const runners = new Map<string, RankRow>();
 for (const platforms of [undefined, ...q.extraPlatforms.map((p) => [p])]) {
   try {
