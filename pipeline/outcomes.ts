@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cfg } from "./config.js";
 import { GmgnApi, type Candle } from "./gmgn.js";
-import { range, simulate } from "./sim.js";
+import { MIN_TRADE_VOLUME, range, simulate } from "./sim.js";
 import { now, readJsonl } from "./store.js";
 
 const env = (k: string, d: number) => (process.env[k] ? Number(process.env[k]) : d);
@@ -119,7 +119,7 @@ const P = cfg.paper;
 console.log(`\n=== Outcome of every token seen (profile ${cfg.profile}) ===`);
 console.log(`entry: next 1m candle after the decision; exit: stop x${P.stopLoss}` + (P.trailArm > 0 ? `, trailing ${P.trailPct * 100}% once ${P.trailArm}x` : "") +
   (P.takeProfit > 0 ? `, target x${P.takeProfit}` : "") + `, costs ${P.costPct}%/side (network fees not included)`);
-console.log(`${rows.length} tokens traded after the decision, ${dead.length} dead (no candle with $1K+ traded after it)` +
+console.log(`${rows.length} tokens traded after the decision, ${dead.length} dead (no candle with $${MIN_TRADE_VOLUME}+ traded after it)` +
   (noData ? `, ${noData} not fetched yet` : "") + "\n");
 console.log(`${"group".padEnd(30)} ${"n".padStart(4)}  ${"dead".padStart(5)}  ${"≥2x".padStart(5)}  ${"≥3x".padStart(5)}  ${"peak".padStart(6)}  ${"win".padStart(5)}  ${"median".padStart(6)}  ${"avg".padStart(6)}`);
 const isAlert = (d: Decision) => d.group === "ALERT (bought)";

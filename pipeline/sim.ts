@@ -8,7 +8,8 @@
 import type { PipelineConfig } from "./config.js";
 import type { Candle } from "./gmgn.js";
 
-export const MIN_TRADE_VOLUME = 1000; // candles with less than $1K traded cannot fill a $5 order at that price
+// candles with less than $1K traded are mostly stray prints that a real order could not fill at (MIN_TRADE_VOLUME to change)
+export const MIN_TRADE_VOLUME = Number(process.env.MIN_TRADE_VOLUME) || 1000;
 
 export interface SimTrade { at: number; ret: number; endAt: number; why: string; peakX: number; lowX: number }
 
