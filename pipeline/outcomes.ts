@@ -119,8 +119,26 @@ const P = cfg.paper;
 console.log(`\n=== Outcome of every token seen (profile ${cfg.profile}) ===`);
 console.log(`entry: next 1m candle after the decision; exit: stop x${P.stopLoss}` + (P.trailArm > 0 ? `, trailing ${P.trailPct * 100}% once ${P.trailArm}x` : "") +
   (P.takeProfit > 0 ? `, target x${P.takeProfit}` : "") + `, costs ${P.costPct}%/side (network fees not included)`);
+const emptyDead = dead.filter((d) => !load(d.address)!.path.length).length;
+// one token in detail: npm run pipeline:outcomes -- --profile early --report --token <address or symbol>
+const ti = process.argv.indexOf("--token");
+if (ti > 0) {
+  const q = (process.argv[ti + 1] ?? "").toLowerCase();
+  const hits = decisions.filter((d) => d.address.toLowerCase() === q || d.symbol.toLowerCase() === q);
+  if (!hits.length) console.log(`\n--token ${q}: the pipeline never decided on a token with that address or symbol`);
+  for (const d of hits) {
+    const c = load(d.address);
+    const K = c?.path ?? [];
+    const big = K.reduce((m, k) => Math.max(m, k.volume || 0), 0);
+    console.log(`\n${d.symbol} ${d.address}\n  ${d.group} ${d.reasons.join(", ")} at ${new Date(d.at * 1000).toLocaleString("sv-SE")}` +
+      `\n  ${c ? `${K.length} candles fetched ${new Date(c.fetchedAt * 1000).toLocaleString("sv-SE")}, largest candle volume $${Math.round(big)}` : "not fetched"}`);
+    for (const k of K.slice(0, 8)) console.log(`    ${new Date(k.t * 1000).toLocaleString("sv-SE")}  o ${k.o.toPrecision(3)} h ${k.h.toPrecision(3)} l ${k.l.toPrecision(3)} c ${k.c.toPrecision(3)}  vol $${Math.round(k.volume)}`);
+  }
+}
+
 console.log(`${rows.length} tokens traded after the decision, ${dead.length} dead (no candle with $${MIN_TRADE_VOLUME}+ traded after it)` +
-  (noData ? `, ${noData} not fetched yet` : "") + "\n");
+  (noData ? `, ${noData} not fetched yet` : "") + "\n" +
+  (dead.length ? `(of the dead, ${emptyDead} came back with no candles at all and ${dead.length - emptyDead} with only small candles)\n` : ""));
 console.log(`${"group".padEnd(30)} ${"n".padStart(4)}  ${"dead".padStart(5)}  ${"≥2x".padStart(5)}  ${"≥3x".padStart(5)}  ${"peak".padStart(6)}  ${"win".padStart(5)}  ${"median".padStart(6)}  ${"avg".padStart(6)}`);
 const isAlert = (d: Decision) => d.group === "ALERT (bought)";
 console.log(line("ALL TOKENS SEEN", rows, dead));
