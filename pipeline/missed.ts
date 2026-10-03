@@ -11,7 +11,7 @@
  *       bot silent     it was in the band while the bot logged nothing (off, or banned)
  *       not listed     it was in the band, young enough, while the bot was running: the scan did
  *                      not return it (row cap, or the API) — a coverage bug to fix
- * Runs slowly on purpose (two kline calls per token) so the pm2 jobs are not banned.
+ * Runs slowly on purpose (three kline calls per token) so the pm2 jobs are not banned.
  */
 
 import { join } from "node:path";
@@ -101,19 +101,24 @@ for (const r of list) {
   } else {
     try {
       const supply = r.marketCap / r.price;
-      const from = r.createdAt - (r.createdAt % 60);
+      // created_timestamp of a graduated row can be its graduation time: find the real launch as the
+      // first 5-minute candle in the 6 hours before it, then read 1-minute candles from there
+      const k5 = await api.klines(cfg.chain, r.address, "5m", r.createdAt - 6 * 3600 - (r.createdAt % 300), Math.min(T, r.createdAt + 300));
+      const launch = Math.min(r.createdAt, k5.length ? k5[0].t : r.createdAt);
+      const from = launch - (launch % 60);
       const K = await api.klines(cfg.chain, r.address, "1m", from, Math.min(T, from + 200 * 60));
       const inBand = K.filter((k) => k.c * supply >= bandLo && k.c * supply <= bandHi);
-      const young = inBand.filter((k) => k.t + 60 - r.createdAt <= maxAge);
+      const young = inBand.filter((k) => k.t + 60 - launch <= maxAge);
+      const born = launch < r.createdAt - 120 ? `launched ${f(launch)}; ` : "";
       if (!inBand.length) {
         verdict = "skipped band";
-        detail = K.length ? `first close $${Math.round((K[0].c * supply) / 1000)}K` : "no candles";
+        detail = born + (K.length ? `first close $${Math.round((K[0].c * supply) / 1000)}K` : "no candles");
       } else if (!young.length) {
         verdict = "too old";
-        detail = `in band from age ${Math.round((inBand[0].t + 60 - r.createdAt) / 60)} min`;
+        detail = born + `in band from age ${Math.round((inBand[0].t + 60 - launch) / 60)} min`;
       } else {
         const a = young[0].t, b = young[young.length - 1].t + 60;
-        detail = `in band ${f(a)}-${f(b).slice(6)} (age ${Math.round((a - r.createdAt) / 60)}-${Math.round((b - r.createdAt) / 60)} min)`;
+        detail = born + `in band ${f(a)}-${f(b).slice(6)} (age ${Math.round((a - launch) / 60)}-${Math.round((b - launch) / 60)} min)`;
         verdict = running(a, b) ? "not listed" : "bot silent";
       }
     } catch (err) {
