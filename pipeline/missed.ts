@@ -110,7 +110,13 @@ for (const r of list) {
       const inBand = K.filter((k) => k.c * supply >= bandLo && k.c * supply <= bandHi);
       const young = inBand.filter((k) => k.t + 60 - launch <= maxAge);
       const born = launch < r.createdAt - 120 ? `launched ${f(launch)}; ` : "";
-      if (!inBand.length) {
+      // a bonding-curve launch starts near $4K; a first candle far above that means the API returned
+      // only the candles after graduation, so the band cannot be judged from them
+      const curve = /pump|bonk|launchlab|moonshot|believe|boop/i.test(String(r.launchpad));
+      if (!inBand.length && curve && K.length && K[0].c * supply > 3 * bandHi) {
+        verdict = "no curve data";
+        detail = born + `first candle already $${Math.round((K[0].c * supply) / 1000)}K: the API has no candles from the bonding curve`;
+      } else if (!inBand.length) {
         verdict = "skipped band";
         detail = born + (K.length ? `first close $${Math.round((K[0].c * supply) / 1000)}K` : "no candles");
       } else if (!young.length) {
@@ -132,4 +138,5 @@ for (const r of list) {
 
 console.log(`\nsummary: ${[...counts].map(([k, v]) => `${k} ${v}`).join(", ")}`);
 console.log(`"not listed" is the one to fix (the bot ran but the scan did not return the token); "too old" and "skipped band"`);
-console.log(`follow from the profile's rules; "bot silent" means the bot was off or banned at that moment.`);
+console.log(`follow from the profile's rules; "bot silent" means the bot was off or banned at that moment; "no curve data" cannot`);
+console.log(`be judged (GMGN returned no candles from before graduation): check those tokens with --token in outcomes instead.`);
