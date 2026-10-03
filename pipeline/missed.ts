@@ -127,7 +127,7 @@ for (const r of list) {
     }
   }
   counts.set(verdict, (counts.get(verdict) ?? 0) + 1);
-  console.log(`${f(r.createdAt)}  ${r.symbol.slice(0, 12).padEnd(12)} now $${Math.round(r.marketCap / 1000)}K`.padEnd(42) + `${verdict.padEnd(18)} ${detail}`);
+  console.log(`${f(r.createdAt)}  ${r.symbol.slice(0, 12).padEnd(12)} ${String(r.launchpad).slice(0, 14).padEnd(14)} now $${Math.round(r.marketCap / 1000)}K`.padEnd(57) + `${verdict.padEnd(18)} ${detail}`);
 }
 
 console.log(`\nsummary: ${[...counts].map(([k, v]) => `${k} ${v}`).join(", ")}`);
