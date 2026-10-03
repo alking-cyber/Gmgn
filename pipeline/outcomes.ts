@@ -125,7 +125,12 @@ const ti = process.argv.indexOf("--token");
 if (ti > 0) {
   const q = (process.argv[ti + 1] ?? "").toLowerCase();
   const hits = decisions.filter((d) => d.address.toLowerCase() === q || d.symbol.toLowerCase() === q);
-  if (!hits.length) console.log(`\n--token ${q}: the pipeline never decided on a token with that address or symbol`);
+  if (!hits.length) {
+    const seenOnly = [...best].filter(([a, b]) => a.toLowerCase() === q || b.e.symbol.toLowerCase() === q);
+    console.log(seenOnly.length
+      ? `\n--token ${q}: seen at ${new Date(seenOnly[0][1].firstSeen * 1000).toLocaleString("sv-SE")} and still being tracked (no decision yet)`
+      : `\n--token ${q}: never in the pipeline's scan results (bot off or banned at the time, outside the scan's market-cap / age / quote-token filters, or past the ${cfg.trenches.limit}-row cap)`);
+  }
   for (const d of hits) {
     const c = load(d.address);
     const K = c?.path ?? [];
