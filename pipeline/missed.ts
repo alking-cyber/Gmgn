@@ -54,7 +54,7 @@ const bandLo = Math.max(q.minMcap, cfg.s1.minMcap || 0);
 const bandHi = Math.min(q.maxMcap, cfg.s1.maxMcap || Infinity);
 const maxAge = Math.min(minutes(q.maxCreated), cfg.s1.maxAgeMin) * 60;
 
-const api = new GmgnApi(Number(process.env.MISSED_RATE_LIMIT) || 0.8, undefined, 3);
+const api = new GmgnApi(Number(process.env.MISSED_RATE_LIMIT) || 0.8, undefined, 8);
 const T = now();
 console.log(`listing tokens launched in the last 24h now worth $${MIN_MCAP / 1000}K+...`);
 const wait = sharedPause() - Date.now();
@@ -66,7 +66,11 @@ for (const platforms of [undefined, ...q.extraPlatforms.map((p) => [p])]) {
       if (r.price > 0 && r.createdAt > 0) runners.set(r.address, r);
     }
   } catch (err) {
-    console.error(`[missed] trenches: ${(err as Error).message}`);
+    // a partial list would hide runners and look like an answer: stop instead
+    console.error(`[missed] could not list tokens: ${(err as Error).message.slice(0, 160)}`);
+    console.error(`\nGMGN keeps banning this IP: the pm2 jobs use the whole rate limit. Run "pm2 stop all", wait a minute,`);
+    console.error(`run this again, then "pm2 start all".`);
+    process.exit(1);
   }
 }
 const list = [...runners.values()].filter((r) => r.createdAt >= (times[0] ?? T) - 3600).sort((a, b) => a.createdAt - b.createdAt);
