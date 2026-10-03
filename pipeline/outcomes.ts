@@ -95,11 +95,13 @@ if (!REPORT_ONLY) {
 
 interface Row { d: Decision; ret: number; peakX: number; lowX: number; why: string }
 const rows: Row[] = [];
+const dead: Decision[] = []; // fetched, but no candle with $1K+ traded after the decision: nothing to buy or sell into
 let noData = 0;
 for (const d of decisions) {
   const c = load(d.address);
   const t = c && simulate(c.path, cfg.paper);
   const r = c && range(c.path);
+  if (c && (!t || !r)) { dead.push(d); continue; }
   if (!t || !r) { noData++; continue; }
   rows.push({ d, ret: t.ret, peakX: r.peakX, lowX: r.lowX, why: t.why });
 }
@@ -108,30 +110,35 @@ const avg = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length
 const med = (a: number[]) => { const v = [...a].sort((x, y) => x - y); return v.length ? v[Math.floor(v.length / 2)] : NaN; };
 const pct = (v: number) => (Number.isFinite(v) ? `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%` : "-");
 const sh = (v: number) => (Number.isFinite(v) ? `${Math.round(v * 100)}%` : "-");
-const line = (label: string, rs: Row[]) =>
-  `${label.padEnd(30)} ${String(rs.length).padStart(4)}  ${sh(rs.filter((r) => r.peakX >= 2).length / rs.length).padStart(5)}  ` +
+const line = (label: string, rs: Row[], ds: Decision[]) =>
+  `${label.padEnd(30)} ${String(rs.length).padStart(4)}  ${sh(ds.length / (ds.length + rs.length)).padStart(5)}  ${sh(rs.filter((r) => r.peakX >= 2).length / rs.length).padStart(5)}  ` +
   `${sh(rs.filter((r) => r.peakX >= 3).length / rs.length).padStart(5)}  ${(med(rs.map((r) => r.peakX)).toFixed(2) + "x").padStart(6)}  ` +
-  `${sh(rs.filter((r) => r.ret > 0).length / rs.length).padStart(5)}  ${pct(avg(rs.map((r) => r.ret))).padStart(6)}`;
+  `${sh(rs.filter((r) => r.ret > 0).length / rs.length).padStart(5)}  ${pct(med(rs.map((r) => r.ret))).padStart(6)}  ${pct(avg(rs.map((r) => r.ret))).padStart(6)}`;
 
 const P = cfg.paper;
 console.log(`\n=== Outcome of every token seen (profile ${cfg.profile}) ===`);
 console.log(`entry: next 1m candle after the decision; exit: stop x${P.stopLoss}` + (P.trailArm > 0 ? `, trailing ${P.trailPct * 100}% once ${P.trailArm}x` : "") +
   (P.takeProfit > 0 ? `, target x${P.takeProfit}` : "") + `, costs ${P.costPct}%/side (network fees not included)`);
-console.log(`${rows.length} tokens with candles` + (noData ? `, ${noData} without (no trading after the decision, or not fetched yet)` : "") + "\n");
-console.log(`${"group".padEnd(30)} ${"n".padStart(4)}  ${"≥2x".padStart(5)}  ${"≥3x".padStart(5)}  ${"peak".padStart(6)}  ${"win".padStart(5)}  ${"trade".padStart(6)}`);
-console.log(line("ALL TOKENS SEEN", rows));
-console.log(line("ALERT (bought)", rows.filter((r) => r.d.group === "ALERT (bought)")));
-console.log(line("turned down", rows.filter((r) => r.d.group !== "ALERT (bought)")));
+console.log(`${rows.length} tokens traded after the decision, ${dead.length} dead (no candle with $1K+ traded after it)` +
+  (noData ? `, ${noData} not fetched yet` : "") + "\n");
+console.log(`${"group".padEnd(30)} ${"n".padStart(4)}  ${"dead".padStart(5)}  ${"≥2x".padStart(5)}  ${"≥3x".padStart(5)}  ${"peak".padStart(6)}  ${"win".padStart(5)}  ${"median".padStart(6)}  ${"avg".padStart(6)}`);
+const isAlert = (d: Decision) => d.group === "ALERT (bought)";
+console.log(line("ALL TOKENS SEEN", rows, dead));
+console.log(line("ALERT (bought)", rows.filter((r) => isAlert(r.d)), dead.filter(isAlert)));
+console.log(line("turned down", rows.filter((r) => !isAlert(r.d)), dead.filter((d) => !isAlert(d))));
 for (const g of ["stage 1", "stage 2", "stage 3"]) {
   const inG = rows.filter((r) => r.d.group === g);
-  if (!inG.length) continue;
-  console.log(line(`  ${g} (all)`, inG));
-  for (const reason of [...new Set(inG.flatMap((r) => r.d.reasons))].sort()) {
-    console.log(line(`    ${reason}`, inG.filter((r) => r.d.reasons.includes(reason))));
+  const deadG = dead.filter((d) => d.group === g);
+  if (!inG.length && !deadG.length) continue;
+  console.log(line(`  ${g} (all)`, inG, deadG));
+  for (const reason of [...new Set([...inG.map((r) => r.d), ...deadG].flatMap((d) => d.reasons))].sort()) {
+    console.log(line(`    ${reason}`, inG.filter((r) => r.d.reasons.includes(reason)), deadG.filter((d) => d.reasons.includes(reason))));
   }
 }
-console.log(`\npeak = median highest price after entry; ≥2x / ≥3x = share that reached it; win / trade = share of winning trades and`);
-console.log(`average trade with the paper exit. A rule is worth keeping only if the tokens it turned down did worse than ALERT.`);
+console.log(`\nn = tokens that traded after the decision; dead = share of the group with no $1K candle after it (left out of the`);
+console.log(`other columns: a group with many dead tokens looks better than it is). peak = median highest price after entry;`);
+console.log(`≥2x / ≥3x = share that reached it; win, median, avg = winning share and per-trade result with the paper exit.`);
+console.log(`avg is pulled up by one big runner; median is the typical trade. A rule is worth keeping only if what it turned down did worse.`);
 console.log(`A token can fail several rules, so the rule rows overlap. Small groups (under 30) mean little.`);
 
 const csv = ["decided_utc,symbol,address,group,reasons,peak_x,low_x,trade_pct,exit"].concat(
