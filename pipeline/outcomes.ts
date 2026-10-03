@@ -120,11 +120,22 @@ console.log(`\n=== Outcome of every token seen (profile ${cfg.profile}) ===`);
 console.log(`entry: next 1m candle after the decision; exit: stop x${P.stopLoss}` + (P.trailArm > 0 ? `, trailing ${P.trailPct * 100}% once ${P.trailArm}x` : "") +
   (P.takeProfit > 0 ? `, target x${P.takeProfit}` : "") + `, costs ${P.costPct}%/side (network fees not included)`);
 const emptyDead = dead.filter((d) => !load(d.address)!.path.length).length;
+// when the bot was scanning: any 10+ minute silence in its event log means it was off (or banned)
+function coverage(): string {
+  const ts = events.map((e) => e.t).filter((t) => t > 0).sort((a, b) => a - b);
+  if (!ts.length) return "no events";
+  const f = (t: number) => new Date(t * 1000).toLocaleString("sv-SE").slice(0, 16);
+  const gaps: string[] = [];
+  for (let i = 1; i < ts.length; i++) if (ts[i] - ts[i - 1] >= 600) gaps.push(`${f(ts[i - 1])} → ${f(ts[i])}`);
+  return `bot events from ${f(ts[0])} to ${f(ts[ts.length - 1])}` + (gaps.length ? `; silent (off or banned): ${gaps.join(", ")}` : "; no silent stretch");
+}
+
 // one token in detail: npm run pipeline:outcomes -- --profile early --report --token <address or symbol>
 const ti = process.argv.indexOf("--token");
 if (ti > 0) {
   const q = (process.argv[ti + 1] ?? "").toLowerCase();
   const hits = decisions.filter((d) => d.address.toLowerCase() === q || d.symbol.toLowerCase() === q);
+  console.log(`\n${coverage()}`);
   if (!hits.length) {
     const seenOnly = [...best].filter(([a, b]) => a.toLowerCase() === q || b.e.symbol.toLowerCase() === q);
     console.log(seenOnly.length
