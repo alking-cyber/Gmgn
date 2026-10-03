@@ -275,11 +275,7 @@ export class Throttle {
    */
   pauseUntil(unixSec: number): void {
     this.pausedUntil = Math.max(this.pausedUntil, unixSec * 1000 + 3000);
-    try {
-      if (this.pausedUntil > sharedPause()) writeFileSync(PAUSE_FILE, String(this.pausedUntil));
-    } catch {
-      // the local pause still holds
-    }
+    if (this.pausedUntil > sharedPause()) writeStamp(PAUSE_FILE, this.pausedUntil);
   }
 
   private syncShared(): void {
@@ -288,13 +284,22 @@ export class Throttle {
 }
 
 const PAUSE_FILE = process.env.GMGN_PAUSE_FILE || join(tmpdir(), "gmgn-rate-limit-pause");
-function sharedPause(): number {
+const KLINE_FILE = PAUSE_FILE + "-kline";
+function sharedStamp(file: string): number {
   try {
-    return Number(readFileSync(PAUSE_FILE, "utf8")) || 0;
+    return Number(readFileSync(file, "utf8")) || 0;
   } catch {
     return 0;
   }
 }
+function writeStamp(file: string, ms: number): void {
+  try {
+    writeFileSync(file, String(ms));
+  } catch {
+    // the local spacing still holds
+  }
+}
+const sharedPause = () => sharedStamp(PAUSE_FILE);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -403,9 +408,14 @@ export class GmgnApi implements GmgnSource {
     const out = new Map<number, Candle>();
     for (let a = from; a < to; a += stepSec * 100) {
       const b = Math.min(to, a + stepSec * 100);
-      const wait = this.nextKlineAt - Date.now();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      // the gap is per IP too: every job on this machine reads and writes the next allowed time
+      for (;;) {
+        const wait = Math.max(this.nextKlineAt, sharedStamp(KLINE_FILE)) - Date.now();
+        if (wait <= 0) break;
+        await new Promise((r) => setTimeout(r, wait + Math.random() * 100));
+      }
       this.nextKlineAt = Date.now() + this.klineGapMs;
+      writeStamp(KLINE_FILE, Date.now() + Math.min(this.klineGapMs, 900));
       const data = unwrap(await this.call(WEIGHT.kline, () => this.client.getTokenKline(chain, address, resolution, a * 1000, b * 1000), 5));
       const list = Array.isArray(data.list) ? (data.list as Obj[]) : [];
       for (const k of list) {
