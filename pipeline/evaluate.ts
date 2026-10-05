@@ -1,0 +1,259 @@
+/**
+ * npm run pipeline:evaluate
+ *
+ * Reads data/events.jsonl + data/journal/*.jsonl and reports:
+ *   1. the funnel and which rules cut the most tokens at each stage
+ *   2. the outcome of every alerted token (peak / final multiple from the journal)
+ *   3. which alert-time features separate runners from the rest
+ *   4. a backtest of the exit strategies in strategies.ts, with slippage and fees
+ *
+ * Slippage and fees here are fixed assumptions (BT_SLIPPAGE_PCT, BT_FEE_PCT),
+ * not derived from on-chain fills. Treat the backtest as a relative comparison
+ * between exit rules, not a P&L forecast.
+ */
+
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { cfg } from "./config.js";
+import { readJsonl } from "./store.js";
+import { STRATEGIES, runExit } from "./strategies.js";
+
+const envNum = (k: string, d: number) => (process.env[k] ? Number(process.env[k]) : d);
+const RUNNER_X = envNum("RUNNER_X", 2); // peak multiple that counts as a runner
+const ENTRY_DELAY_SEC = envNum("BT_ENTRY_DELAY_SEC", 30); // reaction time after the alert
+const SLIPPAGE_PCT = envNum("BT_SLIPPAGE_PCT", 0.5); // per side
+const FEE_PCT = envNum("BT_FEE_PCT", 1); // per side
+
+type Ev = { t: number; type: string; address: string; symbol: string; reasons?: string[]; [k: string]: unknown };
+type Snap = { t: number; price: number; [k: string]: number };
+
+const dir = cfg.dataDir;
+const events = readJsonl<Ev>(join(dir, "events.jsonl"));
+if (!events.length) {
+  console.log(`No events in ${dir}/events.jsonl yet. Run the pipeline first: npm run pipeline`);
+  process.exit(0);
+}
+
+const hours = (events[events.length - 1].t - events[0].t) / 3600;
+console.log(`Data: ${dir} — ${events.length} events over ${hours.toFixed(1)}h\n`);
+
+// ------------------------------------------------------------------ 1. funnel
+
+const byType = (type: string) => events.filter((e) => e.type === type);
+const uniq = (evs: Ev[]) => new Set(evs.map((e) => e.address));
+const seen = uniq(events.filter((e) => e.type.startsWith("s1_")));
+const s1Pass = uniq(byType("s1_pass"));
+const s2Pass = uniq(byType("s2_pass"));
+const alerts = byType("alert");
+
+const share = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1)}%` : "-");
+console.log("=== Funnel ===");
+console.log(`seen            ${seen.size}`);
+console.log(`passed stage 1  ${s1Pass.size}  (${share(s1Pass.size, seen.size)} of seen)`);
+console.log(`passed stage 2  ${s2Pass.size}  (${share(s2Pass.size, s1Pass.size)} of tracked)`);
+console.log(`alerts          ${alerts.length}  (${share(alerts.length, seen.size)} of seen)\n`);
+
+function reasonTable(title: string, evs: Ev[]): void {
+  // Count each token once, using its last recorded reason set.
+  const last = new Map<string, string[]>();
+  for (const e of evs) last.set(e.address, e.reasons ?? []);
+  const counts = new Map<string, number>();
+  for (const rs of last.values()) for (const r of rs) counts.set(r, (counts.get(r) ?? 0) + 1);
+  console.log(`${title} (${last.size} tokens; a token can fail several rules)`);
+  for (const [r, c] of [...counts].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${r.padEnd(24)} ${String(c).padStart(5)}  ${share(c, last.size)}`);
+  }
+  console.log();
+}
+reasonTable("Stage 1 rejections", byType("s1_reject").filter((e) => !s1Pass.has(e.address)));
+reasonTable("Stage 2 failures", byType("s2_fail"));
+reasonTable("Stage 3 failures", byType("s3_fail"));
+
+// ------------------------------------------------------------------ 2. outcomes
+
+interface Outcome {
+  symbol: string;
+  address: string;
+  snaps: Snap[];
+  peakX: number;
+  finalX: number;
+  minX: number;
+  minToPeak: number;
+  hoursJournaled: number;
+  runner: boolean;
+  alert: Ev;
+}
+
+const outcomes: Outcome[] = [];
+for (const a of alerts) {
+  const path = join(dir, "journal", `${a.address}.jsonl`);
+  const snaps = existsSync(path) ? readJsonl<Snap>(path).filter((s) => s.price > 0) : [];
+  if (snaps.length < 2) continue;
+  const p0 = snaps[0].price;
+  let peak = snaps[0];
+  for (const s of snaps) if (s.price > peak.price) peak = s;
+  const peakX = peak.price / p0;
+  outcomes.push({
+    symbol: a.symbol,
+    address: a.address,
+    snaps,
+    peakX,
+    finalX: snaps[snaps.length - 1].price / p0,
+    minX: Math.min(...snaps.map((s) => s.price)) / p0,
+    minToPeak: (peak.t - snaps[0].t) / 60,
+    hoursJournaled: (snaps[snaps.length - 1].t - snaps[0].t) / 3600,
+    runner: peakX >= RUNNER_X,
+    alert: a,
+  });
+}
+
+console.log(`=== Alert outcomes (runner = peak ≥ ${RUNNER_X}x from alert price) ===`);
+if (!outcomes.length) console.log("No journaled alerts yet.\n");
+else {
+  console.log("symbol        peak    final   low     t→peak  journaled");
+  for (const o of outcomes.sort((a, b) => b.peakX - a.peakX)) {
+    console.log(
+      `${o.symbol.slice(0, 12).padEnd(12)}  ${o.peakX.toFixed(2).padStart(5)}x  ${o.finalX.toFixed(2).padStart(5)}x  ` +
+        `${o.minX.toFixed(2).padStart(5)}x  ${o.minToPeak.toFixed(0).padStart(4)}m   ${o.hoursJournaled.toFixed(1)}h` +
+        (o.runner ? "  ← runner" : "")
+    );
+  }
+  const runners = outcomes.filter((o) => o.runner).length;
+  console.log(`\n${runners}/${outcomes.length} alerts ran ≥ ${RUNNER_X}x (${share(runners, outcomes.length)})\n`);
+}
+
+// ------------------------------------------------------------------ 3. what separates runners
+
+if (outcomes.length >= 4) {
+  const features: Record<string, (o: Outcome) => number> = {
+    "holder growth % (tracking)": (o) => get(o.alert, "summary", "holderGrowthPct"),
+    "buy/sell ratio (tracking)": (o) => Math.min(get(o.alert, "summary", "buySellRatio"), 10),
+    "price change % (tracking)": (o) => get(o.alert, "summary", "priceChangePct"),
+    "bot rate": (o) => get(o.alert, "info", "botRate"),
+    "bundler trader %": (o) => get(o.alert, "info", "bundlerTraderPct"),
+    "top10 rate": (o) => get(o.alert, "info", "top10Rate"),
+    "smart wallets": (o) => get(o.alert, "info", "smartWallets"),
+    "KOL wallets": (o) => get(o.alert, "info", "kolWallets"),
+    "rug ratio": (o) => get(o.alert, "row", "rugRatio"),
+    "liquidity $": (o) => get(o.alert, "info", "liquidity"),
+    "market cap $": (o) => get(o.alert, "info", "marketCap"),
+    "holders Δ first 10m": (o) => deltaAfter(o.snaps, "holders", 600),
+    "smart Δ first 10m": (o) => deltaAfter(o.snaps, "smartWallets", 600),
+  };
+  const r = outcomes.filter((o) => o.runner);
+  const rest = outcomes.filter((o) => !o.runner);
+  console.log(`=== Runners (${r.length}) vs rest (${rest.length}): median at alert time ===`);
+  for (const [name, f] of Object.entries(features)) {
+    console.log(`  ${name.padEnd(28)} ${fmt(median(r.map(f))).padStart(10)}  vs ${fmt(median(rest.map(f))).padStart(10)}`);
+  }
+  console.log("  (big gaps are candidate filter rules; small samples mislead — wait for 30+ alerts)\n");
+}
+
+// ------------------------------------------------------------------ 4. backtest
+
+if (outcomes.length) {
+  const cost = (SLIPPAGE_PCT + FEE_PCT) / 100;
+  // Each exit strategy is run twice: entering at the alert, and after a reaction delay.
+  const delays = [...new Set([0, ENTRY_DELAY_SEC])];
+  console.log(`=== Backtest: exit strategies, cost ${SLIPPAGE_PCT + FEE_PCT}%/side, $100 per alert ===`);
+  console.log(
+    "strategy".padEnd(42) +
+      delays.map((d) => `entry +${d}s`.padStart(24)).join("") +
+      "\n" +
+      " ".repeat(42) +
+      delays.map(() => "win%     avg   total".padStart(24)).join("")
+  );
+  for (const [name, rule] of Object.entries(STRATEGIES)) {
+    let line = name.padEnd(42);
+    for (const d of delays) {
+      const rets: number[] = [];
+      for (const o of outcomes) {
+        const start = o.snaps.findIndex((s) => s.t >= o.snaps[0].t + d);
+        if (start < 0 || o.snaps.length - start < 2) continue;
+        rets.push(runExit(o.snaps.slice(start).map((s) => s.price), rule, cost));
+      }
+      if (!rets.length) {
+        line += "-".padStart(24);
+        continue;
+      }
+      const wins = rets.filter((x) => x > 0).length;
+      const avg = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const total = rets.reduce((a, r) => a + 100 * (1 + r), 0);
+      line += `  ${share(wins, rets.length).padStart(6)} ${pcs(avg).padStart(7)} ${("$" + total.toFixed(0)).padStart(7)}`;
+    }
+    console.log(line);
+  }
+  console.log(
+    `  (${outcomes.length} alerts; stops fill at the snapshot price that crossed them, targets at their level;\n` +
+      "   positions still open when the journal ends are closed at the last price. Pick a strategy only after 30+ alerts.)"
+  );
+}
+
+// ------------------------------------------------------------------ 5. paper trading
+
+const closes = byType("paper_close") as unknown as Array<{
+  t: number; symbol: string; reason: string; ret: number; size: number; proceeds: number; heldMin: number; cashAfter: number;
+}>;
+const opens = byType("paper_open");
+if (opens.length) {
+  const P = cfg.paper;
+  console.log(`\n=== Paper trading (${P.positionPct * 100}% per trade, stop x${P.stopLoss}` + (P.takeProfit > 0 ? `, target x${P.takeProfit}` : "") +
+    (P.trailArm > 0 ? `, trailing ${P.trailPct * 100}% once ${P.trailArm}x` : "") + `) ===`);
+  const wins = closes.filter((c) => c.ret > 0).length;
+  const byReason = new Map<string, number>();
+  for (const c of closes) byReason.set(c.reason, (byReason.get(c.reason) ?? 0) + 1);
+  const pnl = closes.reduce((a, c) => a + c.proceeds - c.size, 0);
+  console.log(`opened ${opens.length}, closed ${closes.length}, still open ${opens.length - closes.length}`);
+  console.log(`win ${wins}/${closes.length} (${share(wins, closes.length)}), exits: ${[...byReason].map(([k, v]) => `${k} ${v}`).join(", ")}`);
+  console.log(`realized P&L $${pnl.toFixed(2)} on $${cfg.paper.startCapital} start; cash after last close $${closes.length ? closes[closes.length - 1].cashAfter.toFixed(2) : "-"}`);
+  if (closes.length) {
+    const rets = closes.map((c) => c.ret).sort((a, b) => a - b);
+    console.log(`per trade: median ${pcs(rets[Math.floor(rets.length / 2)])}, avg ${pcs(rets.reduce((a, b) => a + b, 0) / rets.length)}, ` +
+      `worst ${pcs(rets[0])}, best ${pcs(rets[rets.length - 1])}`);
+    const days = (closes[closes.length - 1].t - opens[0].t) / 86400;
+    console.log(`over ${days.toFixed(1)} days. Treat as evidence only after 100+ closed trades across several days.`);
+  }
+  const N = Number(process.env.PAPER_LIST) || 20;
+  const time = (t: number) => new Date(t * 1000).toLocaleString("sv-SE").slice(0, 16);
+  if (closes.length) {
+    console.log(`\nlast ${Math.min(N, closes.length)} closed trades (local time):`);
+    for (const c of closes.slice(-N)) {
+      console.log(`  ${time(c.t)}  ${String(c.symbol).slice(0, 14).padEnd(14)} ${pcs(c.ret).padStart(8)}  $${c.size.toFixed(2)} -> $${c.proceeds.toFixed(2)}  ${c.reason}, held ${Math.round(c.heldMin)}m`);
+    }
+  }
+  const closedAt = new Map<string, number>();
+  for (const c of closes as unknown as Array<{ address: string; t: number }>) closedAt.set(c.address, c.t);
+  const stillOpen = opens.filter((o) => !(closedAt.get(o.address)! >= o.t));
+  if (stillOpen.length) {
+    console.log(`\nopen positions:`);
+    for (const o of stillOpen) console.log(`  ${time(o.t)}  ${String(o.symbol).slice(0, 14).padEnd(14)} $${Number(o.size).toFixed(2)} at ${Number(o.price).toPrecision(3)}  ${o.address}`);
+  }
+}
+
+// ------------------------------------------------------------------ helpers
+
+function get(e: Ev, section: string, key: string): number {
+  const v = (e[section] as Record<string, unknown> | undefined)?.[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : NaN;
+}
+
+function deltaAfter(snaps: Snap[], key: string, sec: number): number {
+  const later = snaps.find((s) => s.t >= snaps[0].t + sec);
+  return later ? later[key] - snaps[0][key] : NaN;
+}
+
+function median(xs: number[]): number {
+  const v = xs.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!v.length) return NaN;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+function fmt(x: number): string {
+  if (!Number.isFinite(x)) return "-";
+  return Math.abs(x) >= 1000 ? x.toFixed(0) : Math.abs(x) >= 10 ? x.toFixed(1) : x.toFixed(3);
+}
+
+function pcs(x: number): string {
+  return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(1)}%`;
+}
