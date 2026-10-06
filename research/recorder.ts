@@ -136,24 +136,30 @@ async function call(weight: number, fn: () => Promise<unknown>): Promise<unknown
 
 // ---------- events ----------
 
-// Busy arms (price spikes, ATHs, every launchpad token) fire hundreds of times an hour; their candles
-// would not fit the rate budget. They keep a fixed random half of all tokens (by address hash, the
-// same half for every arm, so they share candle jobs). Rare arms keep everything.
-const SAMPLE_K = Number(process.env.SAMPLE_K) || 2;
+// Busy arms (price spikes, ATHs, every launchpad token) fire thousands of times an hour; their candles
+// would not fit the rate budget. They keep a fixed random 1/BUSY_K of all tokens, first-buyer arms
+// 1/HALF_K (by address hash: the same tokens for every arm, so they share candle jobs and stay
+// comparable). Rare arms keep everything. Tokens under MIN_MCAP at the trigger are skipped.
+const BUSY_K = Number(process.env.BUSY_K) || 8;
+const HALF_K = Number(process.env.HALF_K) || 2;
+const MIN_MCAP = Number(process.env.MIN_MCAP) || 8000;
 const BUSY = /^(base_|sig(1|3|6|7|8|10|18)$)/;
+const HALF = /^(sm1|kol1)$/;
 const MAX_LAG_SEC = 300;
-export const sampled = (token: string) => {
+export function hash(token: string): number {
   let h = 0;
   for (const ch of token) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return h % SAMPLE_K === 0;
-};
+  return h;
+}
+export const kept = (arm: string, token: string) =>
+  BUSY.test(arm) ? hash(token) % BUSY_K === 0 : HALF.test(arm) ? hash(token) % HALF_K === 0 : true;
 
 let fresh = 0;
 function fire(e: Ev): void {
   const key = `${e.arm}|${e.token}`;
   if (state.fired[key] || SKIP_TOKENS.has(e.token)) return;
   if (nowSec() - e.t > MAX_LAG_SEC) return; // feeds repeat old events (first poll, restarts): not forward
-  if (BUSY.test(e.arm) && !sampled(e.token)) return;
+  if (!kept(e.arm, e.token) || (e.mcap > 0 && e.mcap < MIN_MCAP)) return;
   state.fired[key] = e.t;
   e.seenAt = nowSec();
   appendFileSync(EVENTS, JSON.stringify(e) + "\n");
@@ -218,7 +224,8 @@ async function tokenState(token: string): Promise<State["info"][string] | null> 
 }
 
 async function fireWithState(arm: string, token: string, symbol: string, t: number, extra: Ev["f"], fallbackMcap: number, supply: number) {
-  if (state.fired[`${arm}|${token}`] || SKIP_TOKENS.has(token) || nowSec() - t > MAX_LAG_SEC) return;
+  if (state.fired[`${arm}|${token}`] || SKIP_TOKENS.has(token) || nowSec() - t > MAX_LAG_SEC || !kept(arm, token)) return;
+  if (fallbackMcap > 0 && fallbackMcap < MIN_MCAP) return;
   const s = await tokenState(token);
   fire({
     arm,

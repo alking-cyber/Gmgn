@@ -62,3 +62,19 @@ First pass: 45 runners (Solana, <= 2 days old, ATH >= $300K, holders >= 300, liq
   wallet, weight 3); `/v1/user/wallet_profits` does batch (PnL only, no win rate). Trenches `completed`
   covers only ~2h and is full of fake-mcap meteora tokens; the rank with `history_highest_market_cap`
   is the better runner source.
+
+## Step 3 status (2026-10-06): signal recorder running
+
+`npm run research:record` (`research/recorder.ts`, pm2 job `research`, 1.2 units/s) logs every signal
+source as an arm with the token's state at the trigger; `npm run research:analyze` scores them
+(`--by mcap|age|half`, `--arm <name>`, `--min <n>`). Arms: sm1/sm2/sm3 and kol1/kol2/kol3 (1st/2nd/3rd
+distinct smart-money / KOL buyer within 15 min), sig<N> (GMGN market signal types), hot (enters the 1h
+hot-search top 100), wallet (step-1 wallets buy), base_new/base_near/base_done (launchpad base rates).
+Outcome: entry = 1m close at trigger + 30 s (or when the recorder saw it), 1m path to +1h, 5m to +6h;
+purged tokens = total loss; five exit rules net of 6% round-trip cost.
+
+Budget lessons: unsampled, the feeds fire ~4,300 events/h (ATH ticks alone ~1,500/h) — candles for all
+would need ~3.6 units/s. So busy arms (base_*, sig1/3/6/7/8/10/18) keep a fixed 1/8 of tokens by address
+hash, sm1/kol1 1/2, everything under $8K mcap at the trigger is skipped, and feed rows older than 5 min
+are ignored (feeds replay old events on start). That runs at ~0.9 units/s. The feeds only reach back
+1-4 minutes, so the recorder must run continuously; a stopped recorder is a hole, not a backlog.
