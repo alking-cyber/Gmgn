@@ -29,7 +29,8 @@
     "pipeline:runners": "tsx pipeline/runner-tracker.ts",
     "pipeline:backtest": "tsx pipeline/backtest.ts --profile early",
     "pipeline:outcomes": "tsx pipeline/outcomes.ts",
-    "pipeline:missed": "tsx pipeline/missed.ts"
+    "pipeline:missed": "tsx pipeline/missed.ts",
+    "research:wallets": "tsx research/wallets.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

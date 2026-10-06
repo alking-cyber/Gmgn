@@ -37,3 +37,28 @@ assemble the best pipeline.
    signals and combinations by lift over the base rate, and by the result of a fixed exit rule.
 4. Build the pipeline from the signals that survive step 3, then paper-trade it with a fixed $5 size
    (no compounding) next to the current early bot before any real money.
+
+## Step 1 status (2026-10-06, first pass)
+
+Script: `npm run research:wallets` (`research/wallets.ts`, 1.5 units/s; `--score` re-scores saved data
+without fetching runners). Data is appended under `research/data/` (gitignored); the table is written to
+`research/wallets-step1.md`. Run it every ~12h (runners stay in the rank for 2 days) to build the
+day-by-day sample step 2 needs.
+
+First pass: 45 runners (Solana, <= 2 days old, ATH >= $300K, holders >= 300, liquidity >= $10K, not wash),
+4,861 trader rows (top 100 by profit + top 100 smart_degen per runner), 767 wallets with an early entry
+(entry mcap <= $100K and <= ATH/3, >= 15s after launch, own money, no sniper/bundler/dev/insider tag),
+120 of them early in >= 2 runners. Of those 120:
+- 94 are one coordinated group (entered Open AI / AIKOL / NVIDIA within minutes of each other, ~6 tokens
+  traded in 30d): a farm pumping its own tokens, not copyable. Flagged `cluster(n)`.
+- 6 trade 1,500+ tokens a month (`bot-volume`): bots, not copyable.
+- 20 clean wallets; 16 have positive 30d realized PnL, only 5 >= +10%, none above +30%. Win rates 25-50%.
+  Best: 8E4N…eTdS (+25% 30d, 829 tokens, 4h avg hold), 6kzs…Wn9S (+18%, 101 tokens, swing, holds days),
+  GgDA…ZorSt (+27%, 162 tokens), CTDH…hwE1 (+17%, 266 tokens).
+- Caveats: wallets were chosen *because* they won on these runners (selection bias), and wallet_stats
+  PnL is realized only. Nothing here is copyable until step 2 shows following them (with entry delay and
+  slippage) still pays on days they were not chosen on.
+- API notes: `/v1/user/wallet_stats` takes several addresses but answers only the first (one call per
+  wallet, weight 3); `/v1/user/wallet_profits` does batch (PnL only, no win rate). Trenches `completed`
+  covers only ~2h and is full of fake-mcap meteora tokens; the rank with `history_highest_market_cap`
+  is the better runner source.
