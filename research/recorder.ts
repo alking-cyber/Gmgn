@@ -485,18 +485,17 @@ async function runJobs(budgetMs: number) {
 
 // ---------- loop ----------
 
-let stopping = false;
-for (const sig of ["SIGINT", "SIGTERM"] as const) {
-  process.on(sig, () => {
-    if (stopping) process.exit(1);
-    stopping = true;
-    save();
-    console.log(`\n[${ts()}] stopped, state saved`);
-    process.exit(0);
-  });
-}
-
 async function main() {
+  let stopping = false;
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      if (stopping) process.exit(1);
+      stopping = true;
+      save();
+      console.log(`\n[${ts()}] stopped, state saved`);
+      process.exit(0);
+    });
+  }
   console.log(`[${ts()}] recorder: ${RATE} units/s, watching ${WALLETS.length} wallets, ${state.jobs.length} candle jobs pending`);
   let tick = 0;
   let lastLog = 0;
@@ -535,4 +534,5 @@ async function main() {
   }
 }
 
-await main();
+// only when run directly: research/analyze.ts imports the helpers above
+if (process.argv[1] && /recorder\.ts$/.test(process.argv[1])) await main();
