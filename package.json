@@ -30,7 +30,9 @@
     "pipeline:backtest": "tsx pipeline/backtest.ts --profile early",
     "pipeline:outcomes": "tsx pipeline/outcomes.ts",
     "pipeline:missed": "tsx pipeline/missed.ts",
-    "research:wallets": "tsx research/wallets.ts"
+    "research:wallets": "tsx research/wallets.ts",
+    "research:record": "tsx research/recorder.ts",
+    "research:analyze": "tsx research/analyze.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

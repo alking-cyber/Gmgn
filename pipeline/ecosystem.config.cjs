@@ -1,12 +1,12 @@
 /**
  * pm2 config: runs the paper-trading and tracking jobs in the background on Windows, macOS or Linux.
  *
- *   pm2 start pipeline/ecosystem.config.cjs            # all three
+ *   pm2 start pipeline/ecosystem.config.cjs            # all jobs
  *   pm2 start pipeline/ecosystem.config.cjs --only early
  *   pm2 logs / pm2 status / pm2 stop all
  *
- * All three share one API key, and the Free plan allows about 5 units/s per key and IP (faster
- * calls draw 30-second bans). The rates below add up to about 2.6 units/s. On a paid plan
+ * All jobs share one API key, and the Free plan allows about 5 units/s per key and IP (faster
+ * calls draw 30-second bans). The rates below add up to about 3.8 units/s (2.5 without loose, which is usually stopped). On a paid plan
  * (Plus 20, Pro 50) raise GMGN_RATE_LIMIT / TRACK_RATE_LIMIT and remove KLINE_MIN_GAP_MS.
  * Keep only GMGN_API_KEY in ~/.config/gmgn/.env: values set there override the ones below.
  */
@@ -36,5 +36,7 @@ module.exports = {
     job("loose", "pipeline/run.ts", "--profile loose", { GMGN_RATE_LIMIT: "1" }),
     // records every $100K cross and checks it 7 days later (runner rate)
     job("runners", "pipeline/runner-tracker.ts", "", { TRACK_RATE_LIMIT: "0.8" }),
+    // research step 3: records every signal source and its outcome (pm2 start ... --only research)
+    job("research", "research/recorder.ts", "", { RESEARCH_RATE: "1.2" }),
   ],
 };

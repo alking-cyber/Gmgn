@@ -32,3 +32,4 @@ pipeline/data-runners/
 pipeline/data-early/
 pipeline/data-backtest/
 research/data/
+research/logs/
