@@ -34,6 +34,10 @@ button{font:600 12px system-ui;border:0;border-radius:8px;padding:6px 10px;backg
     <span><i style="background:#555"></i>SPBU/halte/klinik</span>
   </div>
   <div id="status">Memuat peta…</div>
+  <details style="margin-top:6px"><summary style="cursor:pointer">Kepadatan jalan dari sinyal HP (TomTom, gratis)</summary>
+    <div style="display:flex;gap:6px;margin-top:6px"><input id="ttkey" placeholder="API key TomTom" style="flex:1;min-width:0;padding:6px;border-radius:6px;border:0"><button onclick="saveKey()">Simpan</button></div>
+    <div style="opacity:.85;margin-top:4px">Daftar gratis di <a href="https://developer.tomtom.com" target="_blank" rel="noopener" style="color:#f07f2a">developer.tomtom.com</a> (2.500 permintaan/hari). Kuncinya disimpan hanya di HP ini.</div>
+  </details>
 </div>
 <div id="result"></div>
 <script>
@@ -104,9 +108,41 @@ map.on('click', function(ev){
   var mapsLink = 'https://www.google.com/maps?q=' + lat.toFixed(6) + ',' + lon.toFixed(6);
   document.getElementById('result').innerHTML = '<div><b class="big">'+kopi+'</b> kompetitor kopi · <b class="big">'+anchorPts+'</b> poin penarik dalam 200 m <span style="color:#6a7186">('+compNote+')</span></div><table>'+rows+'</table>'+
     '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button onclick="copyRes()">Salin ringkasan</button><a href="'+mapsLink+'" target="_blank" rel="noopener">Buka di Google Maps</a><span style="color:#6a7186">'+lat.toFixed(5)+', '+lon.toFixed(5)+'</span></div>';
+  document.getElementById('result').innerHTML += '<div id="traffic" style="margin-top:8px;padding-top:8px;border-top:1px solid #eee"></div>';
   document.getElementById('result').style.display = 'block';
-  window._res = 'Titik '+lat.toFixed(5)+','+lon.toFixed(5)+' | kompetitor kopi 200m: '+kopi+' | '+CATS.filter(function(c){return c.w}).map(function(c){return c.label+' '+counts[c.key]}).join(', ')+' | '+mapsLink;
+  window._pt = [lat, lon]; fetchTraffic(lat, lon);
+  window._res ='Titik '+lat.toFixed(5)+','+lon.toFixed(5)+' | kompetitor kopi 200m: '+kopi+' | '+CATS.filter(function(c){return c.w}).map(function(c){return c.label+' '+counts[c.key]}).join(', ')+' | '+mapsLink;
 });
+// ---- Kepadatan jalan (TomTom Flow Segment Data: kecepatan aktual vs lancar, dari data pergerakan HP/GPS) ----
+function getKey(){ try{ return localStorage.getItem('ttkey')||''; }catch(e){ return ''; } }
+function saveKey(){ try{ localStorage.setItem('ttkey', document.getElementById('ttkey').value.trim()); }catch(e){} alert('Kunci disimpan. Ketuk peta untuk melihat kepadatan.'); if(window._pt) fetchTraffic(window._pt[0], window._pt[1]); }
+try{ document.getElementById('ttkey').value = getKey(); }catch(e){}
+function loadReadings(){ try{ return JSON.parse(localStorage.getItem('ttreadings')||'[]'); }catch(e){ return []; } }
+function saveReading(r){ var a = loadReadings(); a.push(r); if(a.length>2000) a = a.slice(-2000); try{ localStorage.setItem('ttreadings', JSON.stringify(a)); }catch(e){} }
+var FRC = {FRC0:'jalan utama/arteri', FRC1:'jalan utama', FRC2:'jalan besar', FRC3:'jalan sekunder', FRC4:'jalan lokal besar', FRC5:'jalan lokal', FRC6:'jalan kecil'};
+function fetchTraffic(lat, lon){
+  var el = document.getElementById('traffic'); if(!el) return;
+  var gmaps = 'https://www.google.com/maps/@'+lat.toFixed(5)+','+lon.toFixed(5)+',16z/data=!5m1!1e1';
+  var key = getKey();
+  var gline = '<a href="'+gmaps+'" target="_blank" rel="noopener">Lihat lalu lintas di Google Maps</a> (lapisan merah/kuning dari sinyal HP; cek juga "lalu lintas umum" per jam dan "jam ramai" di minimarket/pasar sekitar).';
+  if(!key){ el.innerHTML = '<div style="color:#6a7186">Kepadatan jalan: isi API key TomTom di panel atas. '+gline+'</div>'; return; }
+  el.innerHTML = '<div style="color:#6a7186">Mengambil kepadatan jalan…</div>';
+  var url = 'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/14/json?unit=KMPH&point='+lat.toFixed(6)+','+lon.toFixed(6)+'&key='+encodeURIComponent(key);
+  fetch(url).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); }).then(function(d){
+    var f = d.flowSegmentData; var cur = f.currentSpeed, free = f.freeFlowSpeed, dens = free ? Math.max(0, Math.round((1 - cur/free)*100)) : 0;
+    var now = new Date(), hour = now.getHours(), wd = now.getDay();
+    saveReading({lat:+lat.toFixed(4), lon:+lon.toFixed(4), t:now.toISOString(), h:hour, wd:wd, dens:dens, cur:cur, free:free, frc:f.frc});
+    var verdict = f.roadClosure ? 'jalan ditutup' : dens >= 70 ? 'macet berat: ramai tapi orang sulit berhenti' : dens >= 30 ? 'padat merayap: paling bagus untuk gerobak (ramai dan mudah singgah)' : dens >= 10 ? 'ramai lancar: ada arus, pastikan ada tempat berhenti' : 'lancar: arus mungkin ada tapi cepat lewat; andalkan hitungan 15 menit';
+    var same = loadReadings().filter(function(r){ return r.lat===+lat.toFixed(4) && r.lon===+lon.toFixed(4); });
+    var byH = {}; same.forEach(function(r){ (byH[r.h]=byH[r.h]||[]).push(r.dens); });
+    var prof = Object.keys(byH).sort(function(a,b){return a-b}).map(function(h){ var a=byH[h]; return String(h).padStart(2,'0')+':00 '+Math.round(a.reduce(function(x,y){return x+y},0)/a.length)+'%'; }).join(' · ');
+    el.innerHTML = '<div><b class="big">'+dens+'%</b> kepadatan sekarang <span style="color:#6a7186">('+cur+' dari '+free+' km/j, '+(FRC[f.frc]||f.frc)+', keyakinan '+Math.round((f.confidence||0)*100)+'%)</span></div>'+
+      '<div style="margin-top:4px">'+verdict+'</div>'+
+      '<div style="margin-top:6px;color:#6a7186">Profil titik ini per jam ('+same.length+' bacaan di HP ini): '+(prof||'baru 1 bacaan; ketuk titik ini lagi di jam berbeda')+'</div>'+
+      '<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button onclick="fetchTraffic(window._pt[0],window._pt[1])">Catat kepadatan sekarang</button><a href="'+gmaps+'" target="_blank" rel="noopener">Google Maps lalu lintas</a></div>';
+    window._res += ' | kepadatan jalan '+dens+'% ('+cur+'/'+free+' km/j) jam '+hour;
+  }).catch(function(e){ el.innerHTML = '<div style="color:#c9453a">Gagal ambil TomTom ('+e.message+'). Cek API key atau kuota. '+gline+'</div>'; });
+}
 function copyRes(){ if(navigator.clipboard){ navigator.clipboard.writeText(window._res).then(function(){ alert('Ringkasan disalin. Tempel ke Titik Singgah atau catatan.'); }); } else { prompt('Salin:', window._res); } }
 map.on('moveend', loadPoi); loadPoi();
 </script>
