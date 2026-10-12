@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Peta Titik Singgah — Lampung Tengah</title>
+<!-- Berdasarkan pola simon04/POImap (MIT): Leaflet + Overpass API, data OpenStreetMap -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+html,body,#map{height:100%;margin:0;font-family:system-ui,sans-serif}
+#panel{position:absolute;top:10px;left:10px;right:10px;z-index:1000;background:#1b2a4a;color:#f6f3ec;border-radius:12px;padding:10px 12px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:420px}
+#panel h1{font-size:15px;margin:0 0 4px}#panel h1 span{color:#f07f2a}
+#panel .leg{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:6px}
+#panel .leg i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+#status{opacity:.85;margin-top:6px}
+#result{position:absolute;bottom:10px;left:10px;right:10px;z-index:1000;background:#fff;color:#17213a;border-radius:12px;padding:10px 12px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25);max-width:420px;display:none}
+#result b.big{font-size:20px;color:#f07f2a}
+#result table{width:100%;border-collapse:collapse;margin-top:6px}#result td{padding:3px 0;border-bottom:1px solid #eee}#result td:last-child{text-align:right;font-weight:600}
+button{font:600 12px system-ui;border:0;border-radius:8px;padding:6px 10px;background:#f07f2a;color:#fff}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <h1>Peta <span>Titik Singgah</span></h1>
+  <div>Geser peta ke titik kandidat, lalu <b>ketuk peta</b>: aplikasi menghitung kompetitor kopi dan penarik keramaian dalam radius 200 m untuk dimasukkan ke Titik Singgah.</div>
+  <div class="leg">
+    <span><i style="background:#c9453a"></i>Kopi/kafe (kompetitor)</span>
+    <span><i style="background:#2b6cb0"></i>Sekolah/kampus</span>
+    <span><i style="background:#6b46c1"></i>Kantor/instansi</span>
+    <span><i style="background:#c98a12"></i>Pasar/minimarket</span>
+    <span><i style="background:#2f8f5b"></i>Masjid</span>
+    <span><i style="background:#555"></i>SPBU/halte/klinik</span>
+  </div>
+  <div id="status">Memuat peta…</div>
+</div>
+<div id="result"></div>
+<script>
+// Pusat awal: Bandar Jaya / Terbanggi Besar, Lampung Tengah
+var map = L.map('map').setView([-4.862, 105.262], 15);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(map);
+var CATS = [
+  {key:'kopi',  color:'#c9453a', q:'[amenity~"cafe|coffee_shop"]', q2:'[shop=coffee]', label:'Kopi/kafe (kompetitor)'},
+  {key:'sekolah', color:'#2b6cb0', q:'[amenity~"school|college|university|kindergarten"]', label:'Sekolah/kampus', w:3},
+  {key:'kantor', color:'#6b46c1', q:'[office]', q2:'[amenity~"townhall|police|bank|post_office|courthouse"]', label:'Kantor/instansi', w:3},
+  {key:'pasar', color:'#c98a12', q:'[amenity=marketplace]', q2:'[shop~"convenience|supermarket|mall|department_store"]', label:'Pasar/minimarket', w:3},
+  {key:'masjid', color:'#2f8f5b', q:'[amenity=place_of_worship][religion=muslim]', label:'Masjid', w:1},
+  {key:'lain', color:'#555', q:'[amenity~"fuel|bus_station|hospital|clinic|doctors"]', q2:'[highway=bus_stop]', label:'SPBU/halte/klinik', w:2}
+];
+var layers = {}, seen = {}, pois = [];
+CATS.forEach(function(c){ layers[c.key] = L.layerGroup().addTo(map); });
+function overpassUrl(bbox){
+  var parts = [];
+  CATS.forEach(function(c){ parts.push('nwr('+bbox+')'+c.q+';'); if(c.q2) parts.push('nwr('+bbox+')'+c.q2+';'); });
+  return 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent('[out:json][timeout:40];(' + parts.join('') + ');out center;');
+}
+function catOf(tags){
+  var a = tags.amenity||'', s = tags.shop||'';
+  if(/cafe|coffee_shop/.test(a) || s==='coffee') return 'kopi';
+  if(/school|college|university|kindergarten/.test(a)) return 'sekolah';
+  if(tags.office || /townhall|police|bank|post_office|courthouse/.test(a)) return 'kantor';
+  if(a==='marketplace' || /convenience|supermarket|mall|department_store/.test(s)) return 'pasar';
+  if(a==='place_of_worship') return 'masjid';
+  return 'lain';
+}
+var loading = false;
+function loadPoi(){
+  if(map.getZoom() < 14){ document.getElementById('status').textContent = 'Perbesar peta (zoom ≥ 14) untuk memuat titik.'; return; }
+  if(loading) return; loading = true;
+  var b = map.getBounds(), bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
+  document.getElementById('status').textContent = 'Memuat data OpenStreetMap…';
+  if(pois.length > 4000){ // buang titik jauh dari layar agar tetap ringan
+    var keep = map.getBounds().pad(2); pois = pois.filter(function(p){ return keep.contains([p.lat, p.lon]); });
+  }
+  fetch(overpassUrl(bbox)).then(function(r){ return r.json(); }).then(function(data){
+    var n = 0;
+    (data.elements||[]).forEach(function(e){
+      if(seen[e.type+e.id]) return; seen[e.type+e.id] = true;
+      var lat = e.lat != null ? e.lat : (e.center && e.center.lat), lon = e.lon != null ? e.lon : (e.center && e.center.lon);
+      if(lat == null) return;
+      var tags = e.tags || {}, c = catOf(tags), cat = CATS.filter(function(x){return x.key===c})[0];
+      pois.push({lat:lat, lon:lon, cat:c, name: tags.name || '(tanpa nama)'});
+      L.circleMarker([lat, lon], {radius:6, color:'#fff', weight:1, fillColor:cat.color, fillOpacity:.95})
+        .bindPopup('<b>'+(tags.name||'(tanpa nama)')+'</b><br>'+cat.label+(tags.opening_hours?'<br>Jam: '+tags.opening_hours:'')).addTo(layers[c]);
+      n++;
+    });
+    document.getElementById('status').textContent = pois.length + ' titik dimuat (' + pois.filter(function(p){return p.cat==='kopi'}).length + ' kopi/kafe). Ketuk peta untuk menilai titik.';
+  }).catch(function(){ document.getElementById('status').textContent = 'Overpass sibuk. Coba lagi beberapa detik.'; }).finally(function(){ loading = false; });
+}
+function dist(a, b, c, d){ var R=6371000, dLat=(c-a)*Math.PI/180, dLon=(d-b)*Math.PI/180, x=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2); return 2*R*Math.atan2(Math.sqrt(x), Math.sqrt(1-x)); }
+var circle = null, pin = null;
+map.on('click', function(ev){
+  var lat = ev.latlng.lat, lon = ev.latlng.lng;
+  if(circle) map.removeLayer(circle); if(pin) map.removeLayer(pin);
+  circle = L.circle([lat, lon], {radius:200, color:'#f07f2a', weight:2, fillOpacity:.08}).addTo(map);
+  pin = L.marker([lat, lon]).addTo(map);
+  var within = pois.filter(function(p){ return dist(lat, lon, p.lat, p.lon) <= 200; });
+  var counts = {}; CATS.forEach(function(c){ counts[c.key] = within.filter(function(p){return p.cat===c.key}).length; });
+  var kopi = counts.kopi, anchorPts = 0;
+  CATS.forEach(function(c){ if(c.w) anchorPts += Math.min(counts[c.key], 2) * c.w; });
+  var compNote = kopi===0 ? (anchorPts>=6 ? 'PELUANG: penarik ramai, belum ada kopi' : 'sepi: penarik sedikit, belum ada kopi') : kopi<=2 ? 'permintaan ada' : 'jenuh, cari titik lain';
+  var rows = CATS.map(function(c){ return '<tr><td>'+c.label+'</td><td>'+counts[c.key]+'</td></tr>'; }).join('');
+  var mapsLink = 'https://www.google.com/maps?q=' + lat.toFixed(6) + ',' + lon.toFixed(6);
+  document.getElementById('result').innerHTML = '<div><b class="big">'+kopi+'</b> kompetitor kopi · <b class="big">'+anchorPts+'</b> poin penarik dalam 200 m <span style="color:#6a7186">('+compNote+')</span></div><table>'+rows+'</table>'+
+    '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button onclick="copyRes()">Salin ringkasan</button><a href="'+mapsLink+'" target="_blank" rel="noopener">Buka di Google Maps</a><span style="color:#6a7186">'+lat.toFixed(5)+', '+lon.toFixed(5)+'</span></div>';
+  document.getElementById('result').style.display = 'block';
+  window._res = 'Titik '+lat.toFixed(5)+','+lon.toFixed(5)+' | kompetitor kopi 200m: '+kopi+' | '+CATS.filter(function(c){return c.w}).map(function(c){return c.label+' '+counts[c.key]}).join(', ')+' | '+mapsLink;
+});
+function copyRes(){ if(navigator.clipboard){ navigator.clipboard.writeText(window._res).then(function(){ alert('Ringkasan disalin. Tempel ke Titik Singgah atau catatan.'); }); } else { prompt('Salin:', window._res); } }
+map.on('moveend', loadPoi); loadPoi();
+</script>
+</body>
+</html>
