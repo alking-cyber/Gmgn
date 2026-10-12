@@ -36,6 +36,11 @@ button{font:600 12px system-ui;border:0;border-radius:8px;padding:6px 10px;backg
   </div>
   </div>
   <div id="status">Memuat peta…</div>
+  <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+    <button onclick="scanArea()" id="scanBtn">Pindai titik ramai di area ini</button>
+    <button onclick="toggleFlow()" id="flowBtn" style="background:#2b6cb0">Lapisan kepadatan jalan</button>
+  </div>
+  <div id="scanList" style="margin-top:6px;max-height:34vh;overflow:auto"></div>
   <details style="margin-top:6px"><summary style="cursor:pointer">Kepadatan jalan dari sinyal HP (TomTom, gratis)</summary>
     <div style="display:flex;gap:6px;margin-top:6px"><input id="ttkey" placeholder="API key TomTom" style="flex:1;min-width:0;padding:6px;border-radius:6px;border:0"><button onclick="saveKey()">Simpan</button></div>
     <div style="opacity:.85;margin-top:4px">Daftar gratis di <a href="https://developer.tomtom.com" target="_blank" rel="noopener" style="color:#f07f2a">developer.tomtom.com</a> (2.500 permintaan/hari). Kuncinya disimpan hanya di HP ini.</div>
@@ -154,6 +159,78 @@ function fetchTraffic(lat, lon){
       '<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button onclick="fetchTraffic(window._pt[0],window._pt[1])">Catat kepadatan sekarang</button><a href="'+gmaps+'" target="_blank" rel="noopener">Google Maps lalu lintas</a></div>';
     window._res += ' | kepadatan jalan '+dens+'% ('+cur+'/'+free+' km/j) jam '+hour;
   }).catch(function(e){ el.innerHTML = '<div style="color:#c9453a">Gagal ambil TomTom ('+e.message+'). Cek API key atau kuota. '+gline+'</div>'; });
+}
+// ---- Lapisan kepadatan jalan seluruh peta (TomTom flow tiles) ----
+var flowLayer = null;
+function toggleFlow(){
+  var key = getKey(); if(!key){ alert('Isi API key TomTom dulu di panel "Kepadatan jalan".'); return; }
+  if(flowLayer){ map.removeLayer(flowLayer); flowLayer = null; document.getElementById('flowBtn').textContent = 'Lapisan kepadatan jalan'; return; }
+  flowLayer = L.tileLayer('https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key='+encodeURIComponent(key), {maxZoom:19, opacity:.85}).addTo(map);
+  document.getElementById('flowBtn').textContent = 'Sembunyikan kepadatan';
+  document.getElementById('status').textContent = 'Lapisan kepadatan: hijau lancar, oranye padat, merah macet (data TomTom saat ini).';
+}
+
+// ---- Pindai otomatis: kandidat dari penarik keramaian, cek kepadatan tiap kandidat, beri tanda ----
+var scanLayer = L.layerGroup().addTo(map), scanning = false;
+function anchorScoreAt(lat, lon){
+  var within = pois.filter(function(p){ return dist(lat, lon, p.lat, p.lon) <= 200; });
+  var counts = {}; CATS.forEach(function(c){ counts[c.key] = within.filter(function(p){return p.cat===c.key}).length; });
+  var pts = 0; CATS.forEach(function(c){ if(c.w) pts += Math.min(counts[c.key], 2) * c.w; });
+  return {pts:pts, kopi:counts.kopi, counts:counts};
+}
+function trafficSuit(dens){ // cocok gerobak: padat merayap 30–70% terbaik
+  if(dens==null) return 0.5; if(dens>=30&&dens<=70) return 1; if(dens>=15&&dens<30) return 0.75; if(dens>70&&dens<=85) return 0.6; if(dens<15) return 0.4; return 0.3;
+}
+function tomtomAt(lat, lon){
+  var key = getKey(); if(!key) return Promise.resolve(null);
+  var url = 'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/14/json?unit=KMPH&point='+lat.toFixed(6)+','+lon.toFixed(6)+'&key='+encodeURIComponent(key);
+  return fetch(url).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){ if(!d||!d.flowSegmentData) return null; var f=d.flowSegmentData; return {dens: f.freeFlowSpeed?Math.max(0,Math.round((1-f.currentSpeed/f.freeFlowSpeed)*100)):0, conf:f.confidence||0, cur:f.currentSpeed, free:f.freeFlowSpeed, frc:f.frc}; }).catch(function(){ return null; });
+}
+function scanArea(){
+  if(scanning) return; scanning = true; scanLayer.clearLayers();
+  var btn = document.getElementById('scanBtn'); btn.textContent = 'Memindai…'; btn.disabled = true;
+  var b = map.getBounds(), bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
+  var q = overpassQuery(bbox).replace('out center 800;', 'out center 3000;');
+  document.getElementById('status').textContent = 'Mengambil penarik keramaian di area ini…';
+  fetchOverpass(q).then(function(data){
+    (data.elements||[]).forEach(function(e){
+      if(seen[e.type+e.id]) return; seen[e.type+e.id] = true;
+      var lat = e.lat != null ? e.lat : (e.center && e.center.lat), lon = e.lon != null ? e.lon : (e.center && e.center.lon); if(lat == null) return;
+      var tags = e.tags || {}, c = catOf(tags), cat = CATS.filter(function(x){return x.key===c})[0];
+      pois.push({lat:lat, lon:lon, cat:c, name: tags.name || '(tanpa nama)'});
+      L.circleMarker([lat, lon], {radius:5, color:'#fff', weight:1, fillColor:cat.color, fillOpacity:.9}).bindPopup('<b>'+(tags.name||'(tanpa nama)')+'</b><br>'+cat.label).addTo(layers[c]);
+    });
+    // kandidat = setiap penarik (bukan kopi) di area, digabung bila berjarak < 150 m
+    var cands = [];
+    pois.filter(function(p){ return p.cat!=='kopi' && b.contains([p.lat,p.lon]); }).forEach(function(p){
+      if(cands.some(function(c){ return dist(c.lat,c.lon,p.lat,p.lon) < 150; })) return;
+      var a = anchorScoreAt(p.lat, p.lon); cands.push({lat:p.lat, lon:p.lon, name:p.name, pts:a.pts, kopi:a.kopi, counts:a.counts});
+    });
+    cands.sort(function(x,y){ return y.pts - x.pts; }); cands = cands.slice(0, 40);
+    if(!cands.length){ throw new Error('tidak ada penarik keramaian di area ini; geser/perbesar peta'); }
+    var hasKey = !!getKey(), i = 0, done = 0;
+    document.getElementById('status').textContent = hasKey ? 'Mengecek kepadatan '+cands.length+' kandidat…' : 'Tanpa API key TomTom: peringkat hanya dari penarik keramaian.';
+    function next(){ if(i >= cands.length) return Promise.resolve(); var c = cands[i++]; return (hasKey ? tomtomAt(c.lat,c.lon) : Promise.resolve(null)).then(function(t){ c.t = t; done++; return next(); }); }
+    return Promise.all([next(), next(), next(), next()]).then(function(){ return cands; });
+  }).then(function(cands){
+    cands.forEach(function(c){
+      var compAdj = c.kopi===0 ? 0 : c.kopi<=2 ? 5 : -10*(c.kopi-2);
+      c.score = Math.round(Math.min(1, c.pts/8)*55 + trafficSuit(c.t?c.t.dens:null)*35 + compAdj + (c.kopi===0&&c.pts>=6?5:0));
+      c.score = Math.max(0, Math.min(100, c.score));
+    });
+    cands.sort(function(x,y){ return y.score - x.score; });
+    cands.forEach(function(c, idx){
+      var col = c.score>=70?'#2f8f5b':c.score>=45?'#c98a12':'#888', lowConf = c.t && c.t.conf < 0.7;
+      L.circleMarker([c.lat,c.lon], {radius:13, color:col, weight:3, dashArray:lowConf?'4 4':null, fillColor:col, fillOpacity:.25}).bindPopup(
+        '<b>#'+(idx+1)+' '+c.name+'</b><br>Skor '+c.score+' · penarik '+c.pts+' poin · '+c.kopi+' kopi dalam 200 m'+(c.t?'<br>Kepadatan '+c.t.dens+'% ('+c.t.cur+'/'+c.t.free+' km/j, keyakinan '+Math.round(c.t.conf*100)+'%)':'<br>Kepadatan: tidak ada data')).addTo(scanLayer);
+      L.marker([c.lat,c.lon], {icon:L.divIcon({className:'', html:'<div style="font:700 11px system-ui;color:#fff;background:'+col+';border-radius:99px;width:20px;height:20px;line-height:20px;text-align:center;transform:translate(-4px,-4px)">'+(idx+1)+'</div>', iconSize:[20,20]})}).addTo(scanLayer);
+    });
+    var list = document.getElementById('scanList');
+    list.innerHTML = cands.slice(0,12).map(function(c, idx){ var col = c.score>=70?'#2f8f5b':c.score>=45?'#c98a12':'#888';
+      return '<div onclick="map.setView(['+c.lat+','+c.lon+'],17)" style="display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid rgba(255,255,255,.15);cursor:pointer"><span style="background:'+col+';color:#fff;border-radius:99px;min-width:22px;text-align:center;font-weight:700">'+(idx+1)+'</span><span style="flex:1;min-width:0">'+c.name+'<br><span style="opacity:.8">penarik '+c.pts+' · kopi '+c.kopi+(c.t?' · padat '+c.t.dens+'%'+(c.t.conf<0.7?' (keyakinan rendah)':''):'')+'</span></span><b>'+c.score+'</b></div>'; }).join('');
+    document.getElementById('status').textContent = cands.length+' kandidat dinilai. Hijau ≥70 layak disurvei, kuning 45–69, abu-abu lemah; garis putus = data kepadatan kurang yakin.';
+  }).catch(function(e){ document.getElementById('status').textContent = 'Pindai gagal: '+e.message; })
+  .finally(function(){ scanning = false; btn.textContent = 'Pindai titik ramai di area ini'; btn.disabled = false; });
 }
 function copyRes(){ if(navigator.clipboard){ navigator.clipboard.writeText(window._res).then(function(){ alert('Ringkasan disalin. Tempel ke Titik Singgah atau catatan.'); }); } else { prompt('Salin:', window._res); } }
 map.on('moveend', loadPoi); loadPoi();
