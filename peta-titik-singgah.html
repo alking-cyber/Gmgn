@@ -23,8 +23,9 @@ button{font:600 12px system-ui;border:0;border-radius:8px;padding:6px 10px;backg
 <body>
 <div id="map"></div>
 <div id="panel">
-  <h1>Peta <span>Titik Singgah</span></h1>
-  <div>Geser peta ke titik kandidat, lalu <b>ketuk peta</b>: aplikasi menghitung kompetitor kopi dan penarik keramaian dalam radius 200 m untuk dimasukkan ke Titik Singgah.</div>
+  <h1>Peta <span>Titik Singgah</span> <button onclick="var p=document.getElementById('more');p.style.display=p.style.display==='none'?'':'none'" style="float:right;padding:2px 8px;background:#f07f2a">▾</button></h1>
+  <div id="more">
+  <div>Geser peta ke titik kandidat, lalu <b>ketuk peta</b>: aplikasi menghitung kompetitor kopi dan penarik keramaian dalam radius 200 m.</div>
   <div class="leg">
     <span><i style="background:#c9453a"></i>Kopi/kafe (kompetitor)</span>
     <span><i style="background:#2b6cb0"></i>Sekolah/kampus</span>
@@ -32,6 +33,7 @@ button{font:600 12px system-ui;border:0;border-radius:8px;padding:6px 10px;backg
     <span><i style="background:#c98a12"></i>Pasar/minimarket</span>
     <span><i style="background:#2f8f5b"></i>Masjid</span>
     <span><i style="background:#555"></i>SPBU/halte/klinik</span>
+  </div>
   </div>
   <div id="status">Memuat peta…</div>
   <details style="margin-top:6px"><summary style="cursor:pointer">Kepadatan jalan dari sinyal HP (TomTom, gratis)</summary>
@@ -54,10 +56,20 @@ var CATS = [
 ];
 var layers = {}, seen = {}, pois = [];
 CATS.forEach(function(c){ layers[c.key] = L.layerGroup().addTo(map); });
-function overpassUrl(bbox){
+var MIRRORS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter','https://z.overpass-api.de/api/interpreter'];
+var mirrorIdx = 0;
+function overpassQuery(bbox){
   var parts = [];
   CATS.forEach(function(c){ parts.push('nwr('+bbox+')'+c.q+';'); if(c.q2) parts.push('nwr('+bbox+')'+c.q2+';'); });
-  return 'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent('[out:json][timeout:40];(' + parts.join('') + ');out center;');
+  return '[out:json][timeout:25];(' + parts.join('') + ');out center 800;';
+}
+function fetchOverpass(query, attempt){
+  attempt = attempt || 0;
+  var url = MIRRORS[(mirrorIdx + attempt) % MIRRORS.length];
+  return fetch(url, {method:'POST', body:'data='+encodeURIComponent(query), headers:{'Content-Type':'application/x-www-form-urlencoded'}})
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(d){ mirrorIdx = (mirrorIdx + attempt) % MIRRORS.length; return d; })
+    .catch(function(e){ if(attempt < MIRRORS.length-1) return fetchOverpass(query, attempt+1); throw e; });
 }
 function catOf(tags){
   var a = tags.amenity||'', s = tags.shop||'';
@@ -77,7 +89,7 @@ function loadPoi(){
   if(pois.length > 4000){ // buang titik jauh dari layar agar tetap ringan
     var keep = map.getBounds().pad(2); pois = pois.filter(function(p){ return keep.contains([p.lat, p.lon]); });
   }
-  fetch(overpassUrl(bbox)).then(function(r){ return r.json(); }).then(function(data){
+  fetchOverpass(overpassQuery(bbox)).then(function(data){
     var n = 0;
     (data.elements||[]).forEach(function(e){
       if(seen[e.type+e.id]) return; seen[e.type+e.id] = true;
@@ -90,7 +102,7 @@ function loadPoi(){
       n++;
     });
     document.getElementById('status').textContent = pois.length + ' titik dimuat (' + pois.filter(function(p){return p.cat==='kopi'}).length + ' kopi/kafe). Ketuk peta untuk menilai titik.';
-  }).catch(function(){ document.getElementById('status').textContent = 'Overpass sibuk. Coba lagi beberapa detik.'; }).finally(function(){ loading = false; });
+  }).catch(function(e){ document.getElementById('status').innerHTML = 'Semua server OSM sibuk ('+e.message+'). <a href="#" onclick="loadPoi();return false" style="color:#f07f2a">Coba lagi</a>'; }).finally(function(){ loading = false; });
 }
 function dist(a, b, c, d){ var R=6371000, dLat=(c-a)*Math.PI/180, dLon=(d-b)*Math.PI/180, x=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2); return 2*R*Math.atan2(Math.sqrt(x), Math.sqrt(1-x)); }
 var circle = null, pin = null;
