@@ -66,7 +66,9 @@ var mirrorIdx = 0;
 function overpassQuery(bbox){
   var parts = [];
   CATS.forEach(function(c){ parts.push('nwr('+bbox+')'+c.q+';'); if(c.q2) parts.push('nwr('+bbox+')'+c.q2+';'); });
-  return '[out:json][timeout:25];(' + parts.join('') + ');out center 800;';
+  // cadangan: objek bernama yang tag-nya tidak lengkap di OSM (umum di Indonesia), dikenali dari nama
+  parts.push('nwr('+bbox+')[name~"(?i)pasar|^(sd|smp|sma|smk|mts|ma|mi|tk) |sekolah|madrasah|pesantren|kampus|universitas|bank|kantor|dinas|kecamatan|indomaret|alfamart|alfamidi|masjid|spbu|puskesmas|klinik|terminal|kopi|coffee|kafe|cafe"];');
+  return '[out:json][timeout:30];(' + parts.join('') + ');out center 1500;';
 }
 function fetchOverpass(query, attempt){
   attempt = attempt || 0;
@@ -77,17 +79,18 @@ function fetchOverpass(query, attempt){
     .catch(function(e){ if(attempt < MIRRORS.length-1) return fetchOverpass(query, attempt+1); throw e; });
 }
 function catOf(tags){
-  var a = tags.amenity||'', s = tags.shop||'';
-  if(/cafe|coffee_shop/.test(a) || s==='coffee') return 'kopi';
-  if(/school|college|university|kindergarten/.test(a)) return 'sekolah';
-  if(tags.office || /townhall|police|bank|post_office|courthouse/.test(a)) return 'kantor';
-  if(a==='marketplace' || /convenience|supermarket|mall|department_store/.test(s)) return 'pasar';
-  if(a==='place_of_worship') return 'masjid';
-  return 'lain';
+  var a = tags.amenity||'', s = tags.shop||'', n = (tags.name||'').toLowerCase();
+  if(/cafe|coffee_shop/.test(a) || s==='coffee' || /\bkopi\b|coffee|kafe|cafe/.test(n)) return 'kopi';
+  if(/school|college|university|kindergarten/.test(a) || /^(sd|smp|sma|smk|mts|ma|mi|tk|paud)\b|sekolah|madrasah|pondok|pesantren|universitas|kampus|politeknik|stkip/.test(n)) return 'sekolah';
+  if(tags.office || /townhall|police|bank|post_office|courthouse/.test(a) || /\bbank\b|kantor|dinas|kecamatan|kelurahan|polsek|polres|koramil|pln|bri\b|bni\b|mandiri|pegadaian|bpjs|kua\b/.test(n)) return 'kantor';
+  if(a==='marketplace' || /convenience|supermarket|mall|department_store/.test(s) || /\bpasar\b|indomaret|alfamart|alfamidi|swalayan|toserba|minimarket|plaza|\bmall\b/.test(n)) return 'pasar';
+  if(a==='place_of_worship' || /masjid|musholla|mushola|gereja/.test(n)) return 'masjid';
+  if(/spbu|pertamina|pom bensin|terminal|halte|stasiun|puskesmas|klinik|rumah sakit|\brs\b|rsud/.test(n)) return 'lain';
+  return null;
 }
 var loading = false;
 function loadPoi(){
-  if(map.getZoom() < 14){ document.getElementById('status').textContent = 'Perbesar peta (zoom ≥ 14) untuk memuat titik.'; return; }
+  if(map.getZoom() < 12){ document.getElementById('status').textContent = 'Perbesar peta sedikit (zoom ≥ 12) untuk memuat titik.'; return; }
   if(loading) return; loading = true;
   var b = map.getBounds(), bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
   document.getElementById('status').textContent = 'Memuat data OpenStreetMap…';
@@ -100,7 +103,7 @@ function loadPoi(){
       if(seen[e.type+e.id]) return; seen[e.type+e.id] = true;
       var lat = e.lat != null ? e.lat : (e.center && e.center.lat), lon = e.lon != null ? e.lon : (e.center && e.center.lon);
       if(lat == null) return;
-      var tags = e.tags || {}, c = catOf(tags), cat = CATS.filter(function(x){return x.key===c})[0];
+      var tags = e.tags || {}, c = catOf(tags); if(!c) return; var cat = CATS.filter(function(x){return x.key===c})[0];
       pois.push({lat:lat, lon:lon, cat:c, name: tags.name || '(tanpa nama)'});
       L.circleMarker([lat, lon], {radius:6, color:'#fff', weight:1, fillColor:cat.color, fillOpacity:.95})
         .bindPopup('<b>'+(tags.name||'(tanpa nama)')+'</b><br>'+cat.label+(tags.opening_hours?'<br>Jam: '+tags.opening_hours:'')).addTo(layers[c]);
@@ -116,6 +119,7 @@ map.on('click', function(ev){
   if(circle) map.removeLayer(circle); if(pin) map.removeLayer(pin);
   circle = L.circle([lat, lon], {radius:200, color:'#f07f2a', weight:2, fillOpacity:.08}).addTo(map);
   pin = L.marker([lat, lon]).addTo(map);
+  if(!pois.length){ document.getElementById('status').textContent = 'Data belum dimuat untuk area ini. Tunggu sebentar lalu ketuk lagi.'; loadPoi(); }
   var within = pois.filter(function(p){ return dist(lat, lon, p.lat, p.lon) <= 200; });
   var counts = {}; CATS.forEach(function(c){ counts[c.key] = within.filter(function(p){return p.cat===c.key}).length; });
   var kopi = counts.kopi, anchorPts = 0;
@@ -190,13 +194,13 @@ function scanArea(){
   if(scanning) return; scanning = true; scanLayer.clearLayers();
   var btn = document.getElementById('scanBtn'); btn.textContent = 'Memindai…'; btn.disabled = true;
   var b = map.getBounds(), bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(',');
-  var q = overpassQuery(bbox).replace('out center 800;', 'out center 3000;');
+  var q = overpassQuery(bbox).replace('out center 1500;', 'out center 3000;');
   document.getElementById('status').textContent = 'Mengambil penarik keramaian di area ini…';
   fetchOverpass(q).then(function(data){
     (data.elements||[]).forEach(function(e){
       if(seen[e.type+e.id]) return; seen[e.type+e.id] = true;
       var lat = e.lat != null ? e.lat : (e.center && e.center.lat), lon = e.lon != null ? e.lon : (e.center && e.center.lon); if(lat == null) return;
-      var tags = e.tags || {}, c = catOf(tags), cat = CATS.filter(function(x){return x.key===c})[0];
+      var tags = e.tags || {}, c = catOf(tags); if(!c) return; var cat = CATS.filter(function(x){return x.key===c})[0];
       pois.push({lat:lat, lon:lon, cat:c, name: tags.name || '(tanpa nama)'});
       L.circleMarker([lat, lon], {radius:5, color:'#fff', weight:1, fillColor:cat.color, fillOpacity:.9}).bindPopup('<b>'+(tags.name||'(tanpa nama)')+'</b><br>'+cat.label).addTo(layers[c]);
     });
